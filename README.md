@@ -1,13 +1,13 @@
 # SwingClips ⛳️
 
-**SwingClips** is a high-performance, AI-driven golf swing analysis tool built for the modern golfer. It transforms your mobile device into a professional swing recording and review station, automatically detecting ball impacts and generating perfectly sliced clips for immediate feedback.
+**SwingClips** is a high-performance golf swing analysis tool built for the modern golfer. It transforms your mobile device into a professional swing recording and review station, automatically detecting ball impacts and generating perfectly sliced clips for immediate feedback.
 
 ---
 
 ## 🚀 Key Features
 
-### 🎙️ AI-Driven Impact Detection
-- **Auto-Slicing:** Uses advanced audio processing to detect the distinct sound of a ball impact. 
+### 🎙️ Smart Acoustic Impact Detection
+- **Auto-Slicing:** Uses high-precision audio transient analysis to detect the distinct sound of a ball impact. 
 - **Hands-Free:** Just hit record and swing. The app automatically isolates each 4-second swing clip (2 seconds before and 2 seconds after impact).
 - **High Sensitivity:** Fine-tuned to catch even quiet shots while filtering out background noise.
 
@@ -30,7 +30,7 @@
 - **Framework:** [Next.js](https://nextjs.org/) (App Router, TypeScript)
 - **Styling:** Tailwind CSS
 - **Video Engine:** `@ffmpeg/ffmpeg` (WASM-based processing)
-- **Audio Analysis:** Web Audio API for transient detection
+- **Acoustic Detection:** Web Audio API for high-precision transient analysis
 - **Persistence:** PWA / Service Workers for offline-capable performance
 - **Icons:** Lucide React
 
