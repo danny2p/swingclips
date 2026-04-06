@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Crosshair, Search } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Crosshair, Search, RefreshCw } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
 import JSZip from 'jszip';
@@ -15,6 +15,7 @@ export default function Home() {
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   const [ballPosition, setBallPosition] = useState({ x: 50, y: 75 }); 
   
   // Processing
@@ -67,9 +68,14 @@ export default function Home() {
 
   // Initialize camera
   const startCamera = useCallback(async () => {
+    // Stop any existing tracks before switching
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: true
       });
       streamRef.current = stream;
@@ -80,7 +86,7 @@ export default function Home() {
       console.error("Error accessing camera", err);
       alert("Could not access camera. Please allow camera and microphone permissions.");
     }
-  }, []);
+  }, [facingMode]);
 
   useEffect(() => {
     if (appState === 'camera') {
@@ -96,6 +102,11 @@ export default function Home() {
       }
     };
   }, [appState, startCamera]);
+
+  const toggleCamera = () => {
+    if (isRecording) return;
+    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+  };
 
   const handleCameraTap = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isRecording) return;
@@ -264,9 +275,21 @@ export default function Home() {
             </div>
           )}
 
+          {/* Camera View Header */}
           <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
-             {!isRecording && <div className="text-[10px] bg-blue-600/80 px-2 py-1 rounded text-white font-bold uppercase">Tap Screen to Set Ball Position</div>}
+             <div className="flex flex-col items-end gap-3">
+               {!isRecording && (
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); toggleCamera(); }}
+                   className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md transition-all active:scale-90 border border-white/10 shadow-lg"
+                   aria-label="Switch Camera"
+                 >
+                   <RefreshCw className="w-6 h-6 text-white" />
+                 </button>
+               )}
+               {!isRecording && <div className="text-[10px] bg-blue-600/80 px-2 py-1 rounded text-white font-bold uppercase shadow-lg">Tap Screen to Set Ball Position</div>}
+             </div>
           </div>
           
           <div className="absolute inset-x-0 bottom-0 pb-12 pt-24 bg-gradient-to-t from-black/80 to-transparent z-10 flex flex-col items-center justify-end">
