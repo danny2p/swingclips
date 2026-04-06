@@ -46,7 +46,22 @@ export async function processSwings(
     const outputFileName = `swing_${i}.${ext}`;
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     try {
-      await fm.exec(['-ss', startTime.toString(), '-i', inputFileName, '-t', duration.toString(), '-c', 'copy', '-map', '0', outputFileName]);
+      // Re-encode with a short keyframe interval (-g 5) for ultra-smooth scrubbing.
+      // Using ultrafast preset and crf 28 to keep processing fast while maintaining quality.
+      // -movflags +faststart helps with immediate playback.
+      await fm.exec([
+        '-ss', startTime.toString(), 
+        '-i', inputFileName, 
+        '-t', duration.toString(), 
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '28',
+        '-g', '5',
+        '-movflags', '+faststart',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        outputFileName
+      ]);
       const data = await fm.readFile(outputFileName);
       const safeData = new Uint8Array(data as any);
       const clipBlob = new Blob([safeData], { type: videoBlob.type });

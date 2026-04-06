@@ -157,6 +157,7 @@ export default function Home() {
       main.addEventListener('pause', handlePause);
       main.addEventListener('timeupdate', handleSync);
       main.addEventListener('seeking', handleSync);
+      main.addEventListener('seeked', handleSync);
       if (!main.paused) handlePlay();
       return () => {
         main.removeEventListener('play', handlePlay);
@@ -480,7 +481,17 @@ export default function Home() {
 
                 {showImpactZoom && (
                   <div className="absolute top-24 left-6 w-32 h-32 md:w-64 md:h-64 rounded-xl border-2 border-blue-500 overflow-hidden shadow-2xl z-40 bg-black animate-in zoom-in duration-300 ring-4 ring-black/50">
-                     <video ref={insetVideoRef} src={clips[selectedClipIndex]} muted playsInline className="w-full h-full object-cover" style={{ transform: 'scale(8)', transformOrigin: `${ballPosition.x}% ${ballPosition.y}%`, imageRendering: 'pixelated' }} />
+                     <video 
+                      ref={insetVideoRef} 
+                      src={clips[selectedClipIndex]} 
+                      muted 
+                      playsInline 
+                      className="w-full h-full object-cover" 
+                      style={{ 
+                        transform: `scale(8) translate(${(50 - ballPosition.x) / 8}%, ${(50 - ballPosition.y) / 8}%)`,
+                        imageRendering: 'pixelated' 
+                      }} 
+                     />
                      <div className="absolute bottom-1 right-1 bg-blue-600 text-[10px] font-bold px-2 py-0.5 rounded text-white uppercase tracking-tighter shadow-lg">Impact Zone (8x)</div>
                   </div>
                 )}
