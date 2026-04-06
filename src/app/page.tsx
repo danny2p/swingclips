@@ -27,6 +27,7 @@ export default function Home() {
   const [sessionNotes, setSessionNotes] = useState('');
   const [shotNotes, setShotNotes] = useState<string[]>([]);
   const [showImpactZoom, setShowImpactZoom] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
 
   // Telestrator (Drawing) State
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -423,23 +424,10 @@ export default function Home() {
           </div>
 
           {selectedClipIndex !== null && (
-            <div className="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden">
-              <div className="p-6 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent absolute top-0 inset-x-0 z-50">
-                <div className="flex flex-col text-white">
-                  <h2 className="text-lg font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
-                  <div className="flex gap-2 mt-1">
-                    <button onClick={() => setShowImpactZoom(!showImpactZoom)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${showImpactZoom ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}><Search className="w-3 h-3" /> Zoom {showImpactZoom ? 'ON' : 'OFF'}</button>
-                    <button onClick={clearCanvas} className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-800 text-gray-400 hover:text-white transition-colors"><Eraser className="w-3 h-3" /> Clear Ink</button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button onClick={(e) => { e.stopPropagation(); shareClip(clips[selectedClipIndex!], selectedClipIndex!); }} className="p-3 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"><Share2 className="w-5 h-5" /></button>
-                  <button onClick={(e) => { e.stopPropagation(); downloadClip(clips[selectedClipIndex!], selectedClipIndex!); }} className="p-3 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"><Download className="w-5 h-5" /></button>
-                  <button onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(null); }} className="p-3 bg-gray-800 rounded-full text-white shadow-lg active:scale-90 transition-transform"><X className="w-5 h-5" /></button>
-                </div>
-              </div>
-
-              <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
+            <div className="fixed inset-0 z-50 bg-black overflow-hidden select-none">
+              
+              {/* Fullscreen Video Container (Matches Camera) */}
+              <div className="absolute inset-0 bg-black overflow-hidden">
                 <video 
                   ref={mainVideoRef} 
                   key={clips[selectedClipIndex]} 
@@ -470,7 +458,7 @@ export default function Home() {
                 />
 
                 {/* Custom Video Controls */}
-                <div className="absolute bottom-6 inset-x-0 z-40 px-6 pointer-events-none">
+                <div className="absolute bottom-10 inset-x-0 z-40 px-6 pointer-events-none">
                   <div className="max-w-3xl mx-auto w-full flex flex-col gap-2 pointer-events-auto">
                     {/* Scrubber */}
                     <div className="w-full flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 shadow-2xl">
@@ -534,16 +522,46 @@ export default function Home() {
                   </div>
                 )}
 
-                <div className="absolute inset-x-4 flex items-center justify-between pointer-events-none z-40">
+                <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 flex items-center justify-between pointer-events-none z-40">
                   <button disabled={selectedClipIndex === 0} onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(selectedClipIndex - 1); }} className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === 0 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}><ChevronLeft className="w-8 h-8" /></button>
                   <button disabled={selectedClipIndex === clips.length - 1} onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(selectedClipIndex + 1); }} className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === clips.length - 1 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}><ChevronRight className="w-8 h-8" /></button>
                 </div>
               </div>
 
-              <div className="p-6 bg-gray-950 border-t border-gray-800 animate-in slide-in-from-bottom duration-300 z-40">
-                <div className="flex items-center gap-2 mb-3 text-blue-400"><FileText className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Swing Notes</h3></div>
-                <textarea value={shotNotes[selectedClipIndex]} onChange={(e) => updateShotNote(selectedClipIndex, e.target.value)} placeholder="Record feedback for this swing..." className="w-full bg-black border border-gray-800 rounded-xl p-4 text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[100px]" />
+              {/* Header Overlay */}
+              <div className="p-6 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent absolute top-0 inset-x-0 z-50 pointer-events-none">
+                <div className="flex flex-col text-white pointer-events-auto">
+                  <h2 className="text-lg font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
+                  <div className="flex gap-2 mt-1">
+                    <button onClick={() => setShowImpactZoom(!showImpactZoom)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${showImpactZoom ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}><Search className="w-3 h-3" /> Zoom {showImpactZoom ? 'ON' : 'OFF'}</button>
+                    <button onClick={clearCanvas} className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-800 text-gray-400 hover:text-white transition-colors"><Eraser className="w-3 h-3" /> Clear Ink</button>
+                    <button onClick={() => setShowNotes(!showNotes)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${showNotes ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}><FileText className="w-3 h-3" /> Notes {showNotes ? 'ON' : 'OFF'}</button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 pointer-events-auto">
+                  <button onClick={(e) => { e.stopPropagation(); shareClip(clips[selectedClipIndex!], selectedClipIndex!); }} className="p-3 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"><Share2 className="w-5 h-5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); downloadClip(clips[selectedClipIndex!], selectedClipIndex!); }} className="p-3 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"><Download className="w-5 h-5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(null); }} className="p-3 bg-gray-800 rounded-full text-white shadow-lg active:scale-90 transition-transform"><X className="w-5 h-5" /></button>
+                </div>
               </div>
+
+              {/* Notes Overlay */}
+              {showNotes && (
+                <div className="absolute inset-x-0 bottom-32 px-6 z-50 animate-in slide-in-from-bottom duration-300">
+                  <div className="max-w-xl mx-auto bg-gray-900/90 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl">
+                    <div className="flex items-center gap-2 mb-3 text-blue-400">
+                      <FileText className="w-5 h-5" />
+                      <h3 className="font-bold text-sm uppercase tracking-wider">Swing Notes</h3>
+                    </div>
+                    <textarea 
+                      value={shotNotes[selectedClipIndex]} 
+                      onChange={(e) => updateShotNote(selectedClipIndex, e.target.value)} 
+                      placeholder="Record feedback for this swing..." 
+                      className="w-full bg-black/40 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[120px]" 
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
