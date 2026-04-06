@@ -14,12 +14,10 @@
 ### 🎥 Advanced Video Review
 - **Silky-Smooth Scrubbing:** Custom-engineered video engine (FFmpeg) re-encodes clips with frequent keyframes for a native-feeling, frame-by-frame review experience.
 - **Slow-Motion Playback:** Toggle between normal speed and **0.25x speed** to analyze every detail of your tempo and form.
-- **Impact Zone Zoom (8x):** A secondary, perfectly centered zoom window that focuses on the ball position you set during setup.
 - **Telestrator (Drawing):** Draw directly on the screen with your finger to analyze swing planes, head movement, and alignment.
 
 ### 📱 Built for the Range
 - **PWA Support:** Install SwingClips as a standalone app on your iPhone or Android device.
-- **Draggable Alignment:** Fine-tune your ball target with a responsive, draggable crosshair.
 - **Native Sharing:** Use the built-in Share button to save swings directly to your **Photos/Gallery** or share them via text/social media.
 - **Session Reporting:** Add notes to individual swings or the entire session, and export everything as a convenient ZIP archive.
 
@@ -66,10 +64,9 @@
 ## 💡 How to Use
 
 1. **Set Up:** Place your phone on a tripod or stand facing your swing path.
-2. **Align:** Drag the "Align Ball" crosshair until it is centered on where you will be hitting the ball.
-3. **Record:** Tap the Record button.
-4. **Swing:** Hit as many balls as you like. Wait ~3 seconds between shots.
-5. **Review:** Stop recording and wait for processing. Each swing will appear in your gallery with full analysis tools (Slow-mo, Zoom, Drawing) ready to go.
+2. **Record:** Tap the Record button.
+3. **Swing:** Hit as many balls as you like. Wait ~3 seconds between shots.
+4. **Review:** Stop recording and wait for processing. Each swing will appear in your gallery with full analysis tools (Slow-mo, Drawing) ready to go.
 
 ---
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Crosshair, Search, RefreshCw, Pencil, Eraser, Play, Pause, Gauge } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, RefreshCw, Eraser, Play, Pause, Gauge } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
 import JSZip from 'jszip';
@@ -16,7 +16,6 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
-  const [ballPosition, setBallPosition] = useState({ x: 50, y: 75 }); 
   
   // Processing
   const [progressText, setProgressText] = useState('');
@@ -26,7 +25,6 @@ export default function Home() {
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
   const [sessionNotes, setSessionNotes] = useState('');
   const [shotNotes, setShotNotes] = useState<string[]>([]);
-  const [showImpactZoom, setShowImpactZoom] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
 
   // Telestrator (Drawing) State
@@ -35,6 +33,7 @@ export default function Home() {
   const [drawColor, setDrawColor] = useState('#22c55e'); // Green
 
   // Player state
+  const mainVideoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -59,9 +58,6 @@ export default function Home() {
     setPlaybackRate(newRate);
     if (mainVideoRef.current) {
       mainVideoRef.current.playbackRate = newRate;
-    }
-    if (insetVideoRef.current) {
-      insetVideoRef.current.playbackRate = newRate;
     }
   };
 
@@ -107,10 +103,6 @@ export default function Home() {
       setPlaybackRate(1);
     }
   }, [selectedClipIndex]);
-
-  // Synchronized Inset Video logic
-  const mainVideoRef = useRef<HTMLVideoElement>(null);
-  const insetVideoRef = useRef<HTMLVideoElement>(null);
 
   // Handle Drawing Logic
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
@@ -158,30 +150,6 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    const main = mainVideoRef.current;
-    const inset = insetVideoRef.current;
-
-    if (selectedClipIndex !== null && showImpactZoom && main && inset) {
-      inset.currentTime = main.currentTime;
-      const handleSync = () => { if (Math.abs(inset.currentTime - main.currentTime) > 0.1) inset.currentTime = main.currentTime; };
-      const handlePlay = () => inset.play().catch(() => {});
-      const handlePause = () => inset.pause();
-      main.addEventListener('play', handlePlay);
-      main.addEventListener('pause', handlePause);
-      main.addEventListener('timeupdate', handleSync);
-      main.addEventListener('seeking', handleSync);
-      main.addEventListener('seeked', handleSync);
-      if (!main.paused) handlePlay();
-      return () => {
-        main.removeEventListener('play', handlePlay);
-        main.removeEventListener('pause', handlePause);
-        main.removeEventListener('timeupdate', handleSync);
-        main.removeEventListener('seeking', handleSync);
-      };
-    }
-  }, [selectedClipIndex, showImpactZoom, clips]);
-
   const startCamera = useCallback(async () => {
     if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
     try {
@@ -208,26 +176,6 @@ export default function Home() {
   }, [appState, startCamera]);
 
   const toggleCamera = () => { if (!isRecording) setFacingMode(prev => prev === 'user' ? 'environment' : 'user'); };
-
-  const updateBallPosition = (clientX: number, clientY: number, target: HTMLDivElement) => {
-    if (isRecording) return;
-    const rect = target.getBoundingClientRect();
-    const x = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
-    const y = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
-    setBallPosition({ x, y });
-  };
-
-  const handleCameraInteraction = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
-    if (isRecording) return;
-    
-    // For MouseEvents, only update if button is down (dragging) or it's a click
-    if ('buttons' in e && e.type === 'mousemove' && e.buttons !== 1) return;
-    
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    
-    updateBallPosition(clientX, clientY, e.currentTarget);
-  };
 
   const startRecording = useCallback(() => {
     if (!streamRef.current) return;
@@ -344,47 +292,17 @@ export default function Home() {
     <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden select-none">
       
       {appState === 'camera' && (
-        <div 
-          className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden touch-none" 
-          onMouseDown={handleCameraInteraction}
-          onMouseMove={handleCameraInteraction}
-          onTouchMove={handleCameraInteraction}
-          onTouchStart={handleCameraInteraction}
-        >
+        <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover absolute inset-0 z-0" />
-          {!isRecording && (
-            <div className="absolute z-10 flex flex-col items-center pointer-events-none" style={{ left: `${ballPosition.x}%`, top: `${ballPosition.y}%`, transform: 'translate(-50%, -50%)' }}>
-               <div className="w-16 h-16 border-2 border-dashed border-blue-400 rounded-full flex items-center justify-center animate-pulse bg-blue-400/10"><Crosshair className="w-6 h-6 text-blue-400" /></div>
-               <span className="mt-2 text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">Align Ball</span>
-            </div>
-          )}
-          <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
-             <div className="flex flex-col items-end gap-3" onClick={(e) => e.stopPropagation()}>
-               {!isRecording && <button 
-                onClick={(e) => { e.stopPropagation(); toggleCamera(); }} 
-                onMouseDown={(e) => e.stopPropagation()}
-                onMouseMove={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-                onTouchMove={(e) => e.stopPropagation()}
-                className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"
-              >
-                <RefreshCw className="w-6 h-6 text-white" />
-              </button>}
-               {!isRecording && <div className="text-[10px] bg-blue-600/80 px-2 py-1 rounded text-white font-bold uppercase shadow-lg">Tap Screen to Set Ball Position</div>}
+             <div className="flex flex-col items-end gap-3">
+               {!isRecording && <button onClick={toggleCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><RefreshCw className="w-6 h-6 text-white" /></button>}
              </div>
           </div>
           <div className="absolute inset-x-0 bottom-0 pb-12 pt-24 bg-gradient-to-t from-black/80 to-transparent z-10 flex flex-col items-center justify-end">
             {isRecording && <div className="mb-6 flex items-center space-x-2 text-red-500 font-bold animate-pulse"><div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div><span className="drop-shadow-md uppercase tracking-widest text-xs text-white">Recording</span></div>}
-            <button onClick={(e) => { e.stopPropagation(); isRecording ? stopRecording() : startRecording(); }} 
-              onMouseDown={(e) => e.stopPropagation()}
-              onMouseMove={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchMove={(e) => e.stopPropagation()}
-              className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 ${isRecording ? "bg-red-500 scale-90" : "bg-white hover:bg-gray-200"}`}
-            >
-              {isRecording ? <Square className="text-white w-8 h-8 fill-current" /> : <div className="w-16 h-16 rounded-full border-4 border-black/10 bg-red-500 flex items-center justify-center"><Video className="text-white w-8 h-8" /></div>}
-            </button>
+            <button onClick={isRecording ? stopRecording : startRecording} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 ${isRecording ? "bg-red-500 scale-90" : "bg-white hover:bg-gray-200"}`}>{isRecording ? <Square className="text-white w-8 h-8 fill-current" /> : <div className="w-16 h-16 rounded-full border-4 border-black/10 bg-red-500 flex items-center justify-center"><Video className="text-white w-8 h-8" /></div>}</button>
           </div>
         </div>
       )}
@@ -426,7 +344,7 @@ export default function Home() {
           {selectedClipIndex !== null && (
             <div className="fixed inset-0 z-50 bg-black overflow-hidden select-none">
               
-              {/* Fullscreen Video Container (Matches Camera) */}
+              {/* Fullscreen Video Container */}
               <div className="absolute inset-0 bg-black overflow-hidden">
                 <video 
                   ref={mainVideoRef} 
@@ -505,23 +423,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {showImpactZoom && (
-                  <div className="absolute top-24 left-6 w-32 h-32 md:w-64 md:h-64 rounded-xl border-2 border-blue-500 overflow-hidden shadow-2xl z-40 bg-black animate-in zoom-in duration-300 ring-4 ring-black/50">
-                     <video 
-                      ref={insetVideoRef} 
-                      src={clips[selectedClipIndex]} 
-                      muted 
-                      playsInline 
-                      className="w-full h-full object-cover" 
-                      style={{ 
-                        transform: `translate(${50 - ballPosition.x}%, ${50 - ballPosition.y}%) scale(8)`,
-                        imageRendering: 'pixelated' 
-                      }} 
-                     />
-                     <div className="absolute bottom-1 right-1 bg-blue-600 text-[10px] font-bold px-2 py-0.5 rounded text-white uppercase tracking-tighter shadow-lg">Impact Zone (8x)</div>
-                  </div>
-                )}
-
                 <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 flex items-center justify-between pointer-events-none z-40">
                   <button disabled={selectedClipIndex === 0} onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(selectedClipIndex - 1); }} className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === 0 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}><ChevronLeft className="w-8 h-8" /></button>
                   <button disabled={selectedClipIndex === clips.length - 1} onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(selectedClipIndex + 1); }} className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === clips.length - 1 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}><ChevronRight className="w-8 h-8" /></button>
@@ -533,7 +434,6 @@ export default function Home() {
                 <div className="flex flex-col text-white pointer-events-auto">
                   <h2 className="text-lg font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
                   <div className="flex gap-2 mt-1">
-                    <button onClick={() => setShowImpactZoom(!showImpactZoom)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${showImpactZoom ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}><Search className="w-3 h-3" /> Zoom {showImpactZoom ? 'ON' : 'OFF'}</button>
                     <button onClick={clearCanvas} className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-800 text-gray-400 hover:text-white transition-colors"><Eraser className="w-3 h-3" /> Clear Ink</button>
                     <button onClick={() => setShowNotes(!showNotes)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${showNotes ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}><FileText className="w-3 h-3" /> Notes {showNotes ? 'ON' : 'OFF'}</button>
                   </div>
