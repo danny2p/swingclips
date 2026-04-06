@@ -1,4 +1,4 @@
-const CACHE_NAME = 'swingclips-cache-v2';
+const CACHE_NAME = 'swingclips-cache-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',
@@ -9,29 +9,28 @@ const ASSETS_TO_CACHE = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE))
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
+  // Immediately take control of the page without waiting for a refresh
   event.waitUntil(self.clients.claim());
 });
 
 self.addEventListener('fetch', (event) => {
-  // Use a proxy strategy to inject security headers
-  // This allows FFmpeg.wasm to work on hosts that strip COOP/COEP headers
+  // Only intercept same-origin requests or specific CDN requests to avoid CORS issues
+  // But ensure COOP/COEP are applied to make SharedArrayBuffer work
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // If the response is already valid, clone it and add headers
-        if (response.status === 0) return response;
+        if (response.status === 0) return response; // Handled by browser
 
         const newHeaders = new Headers(response.headers);
         newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
         newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
+        newHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin'); // Critical for allowing resources
 
         return new Response(response.body, {
           status: response.status,
@@ -39,9 +38,6 @@ self.addEventListener('fetch', (event) => {
           headers: newHeaders,
         });
       })
-      .catch(() => {
-        // Fallback to cache for offline support
-        return caches.match(event.request);
-      })
+      .catch(() => caches.match(event.request))
   );
 });
