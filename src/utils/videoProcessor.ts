@@ -1,5 +1,5 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 let ffmpeg: FFmpeg | null = null;
 
@@ -9,23 +9,23 @@ export async function initFFmpeg(onProgress: (msg: string) => void): Promise<FFm
   onProgress('Initializing video engine...');
   ffmpeg = new FFmpeg();
   
-  // Check for cross-origin isolation which is required for multi-threaded FFmpeg
-  if (typeof window !== 'undefined' && !window.crossOriginIsolated) {
-    console.warn("Window is not cross-origin isolated. FFmpeg may hang.");
-    onProgress('Warning: Security headers missing. Engine may be slow or hang...');
-  }
+  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
 
   try {
-    onProgress('Loading video core (30MB)...');
+    onProgress('Fetching video core from CDN...');
+    
+    // Using toBlobURL is the most reliable way to load FFmpeg on production hosts
+    // It bypasses many path and MIME-type issues by creating a local blob reference
     await ffmpeg.load({
-      coreURL: '/ffmpeg/ffmpeg-core.js',
-      wasmURL: '/ffmpeg/ffmpeg-core.wasm',
-      workerURL: '/ffmpeg/ffmpeg-core.worker.js',
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
     });
+    
     onProgress('Engine ready.');
   } catch (err) {
     console.error("FFmpeg Load Error:", err);
-    onProgress(`Error loading engine: ${err instanceof Error ? err.message : String(err)}`);
+    onProgress(`Error loading engine. Please check your internet connection and security settings.`);
     throw err;
   }
   
@@ -72,7 +72,6 @@ export async function processSwings(
       const clipUrl = URL.createObjectURL(clipBlob);
       clipUrls.push(clipUrl);
       
-      // Cleanup the virtual file after reading
       await fm.deleteFile(outputFileName);
     } catch (err) {
       console.error(`Error processing swing ${i}:`, err);
