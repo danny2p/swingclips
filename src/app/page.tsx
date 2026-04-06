@@ -12,6 +12,7 @@ export default function Home() {
   
   // Camera & Recording
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [ballPosition, setBallPosition] = useState({ x: 50, y: 75 }); 
@@ -71,6 +72,7 @@ export default function Home() {
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: true
       });
+      streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
@@ -86,9 +88,11 @@ export default function Home() {
     }
     
     return () => {
-      if (videoRef.current?.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop();
+        });
+        streamRef.current = null;
       }
     };
   }, [appState, startCamera]);
@@ -103,9 +107,9 @@ export default function Home() {
 
   // Handle Recording
   const startRecording = useCallback(() => {
-    if (!videoRef.current?.srcObject) return;
+    if (!streamRef.current) return;
     
-    const stream = videoRef.current.srcObject as MediaStream;
+    const stream = streamRef.current;
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm;codecs=vp8,opus';
     const mediaRecorder = new MediaRecorder(stream, { mimeType });
     
@@ -309,12 +313,12 @@ export default function Home() {
           <div className="flex-1 overflow-y-auto bg-gray-950">
              <div className="p-4 max-w-7xl mx-auto w-full">
                <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6 shadow-lg">
-                  <div className="flex items-center gap-2 mb-2 text-blue-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider">Overall Session Notes</h3></div>
+                  <div className="flex items-center gap-2 mb-2 text-blue-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Overall Session Notes</h3></div>
                   <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Club: 7-Iron, Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[80px]" />
                </div>
                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                   {clips.map((clipUrl, idx) => (
-                    <div key={idx} onClick={() => setSelectedClipIndex(idx)} className="relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 cursor-pointer active:scale-95 transition-transform">
+                    <div key={idx} onClick={() => setSelectedClipIndex(idx)} className="relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 cursor-pointer active:scale-95 transition-transform" title={`Swing #${idx + 1}`}>
                       <div className="aspect-[3/4] bg-black relative">
                         <video src={clipUrl} className="w-full h-full object-cover pointer-events-none" muted playsInline />
                         {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
@@ -359,9 +363,9 @@ export default function Home() {
                        playsInline
                        className="w-full h-full object-cover"
                        style={{
-                         transform: 'scale(8)', // Balanced at 8x magnification
+                         transform: 'scale(8)', 
                          transformOrigin: `${ballPosition.x}% ${ballPosition.y}%`,
-                         imageRendering: 'pixelated' // Keep edges sharp at high zoom
+                         imageRendering: 'pixelated'
                        }}
                      />
                      <div className="absolute inset-0 border border-blue-400/30 pointer-events-none"></div>

@@ -3,23 +3,16 @@ import { fetchFile } from '@ffmpeg/util';
 
 let ffmpeg: FFmpeg | null = null;
 
-// Helper to load external resources directly to Blob URL to bypass some CORS restrictions
-async function toBlobURL(url: string, mimeType: string): Promise<string> {
-  const resp = await fetch(url);
-  const blob = await resp.blob();
-  const fileBlob = new Blob([blob], { type: mimeType });
-  return URL.createObjectURL(fileBlob);
-}
-
+// Use local files for 100% offline support
 export async function initFFmpeg(): Promise<FFmpeg> {
   if (ffmpeg) return ffmpeg;
   
   ffmpeg = new FFmpeg();
-  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
   
   await ffmpeg.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+    coreURL: '/ffmpeg/ffmpeg-core.js',
+    wasmURL: '/ffmpeg/ffmpeg-core.wasm',
+    workerURL: '/ffmpeg/ffmpeg-core.worker.js',
   });
   
   return ffmpeg;
@@ -36,23 +29,20 @@ export async function processSwings(
   const inputFileName = `input.${ext}`;
   
   onProgress('Loading video engine...');
-  // Write the file to ffmpeg virtual file system
   await fm.writeFile(inputFileName, await fetchFile(videoBlob));
   
   const clipUrls: string[] = [];
   
   for (let i = 0; i < impacts.length; i++) {
     const impactTime = impacts[i];
-    // Start 2 seconds before impact, but not less than 0
     const startTime = Math.max(0, impactTime - 2); 
-    const duration = 4; // Total clip length is 4 seconds
+    const duration = 4; 
     
     const outputFileName = `swing_${i}.${ext}`;
     
     onProgress(`Extracting swing ${i + 1} of ${impacts.length}...`);
     
-    // Placing -ss BEFORE -i is faster and often more reliable for the first clip
-    // as it seeks to the nearest keyframe before the timestamp.
+    // Placing -ss BEFORE -i is faster and more reliable
     await fm.exec([
       '-ss', startTime.toString(),
       '-i', inputFileName,
@@ -69,8 +59,6 @@ export async function processSwings(
     clipUrls.push(clipUrl);
   }
   
-  // Cleanup virtual fs
   await fm.deleteFile(inputFileName);
-  
   return clipUrls;
 }
