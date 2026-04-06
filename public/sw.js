@@ -1,4 +1,4 @@
-const CACHE_NAME = 'swingclips-cache-v1';
+const CACHE_NAME = 'swingclips-cache-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',
@@ -21,9 +21,27 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Use a proxy strategy to inject security headers
+  // This allows FFmpeg.wasm to work on hosts that strip COOP/COEP headers
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request);
-    })
+    fetch(event.request)
+      .then((response) => {
+        // If the response is already valid, clone it and add headers
+        if (response.status === 0) return response;
+
+        const newHeaders = new Headers(response.headers);
+        newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
+        newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: newHeaders,
+        });
+      })
+      .catch(() => {
+        // Fallback to cache for offline support
+        return caches.match(event.request);
+      })
   );
 });
