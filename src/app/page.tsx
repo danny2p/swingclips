@@ -1,14 +1,15 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, RefreshCw, Eraser, Play, Pause, Gauge } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, RefreshCw, Eraser, Play, Pause, Gauge, History, Trash2 } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
+import { Session, getAllSessions, saveSession, deleteSession } from '@/utils/db';
 import JSZip from 'jszip';
 
 export default function Home() {
-  // App states: 'camera' | 'processing' | 'gallery'
-  const [appState, setAppState] = useState<'camera' | 'processing' | 'gallery'>('camera');
+  // App states: 'camera' | 'processing' | 'gallery' | 'history'
+  const [appState, setAppState] = useState<'camera' | 'processing' | 'gallery' | 'history'>('camera');
   
   // Camera & Recording
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -20,6 +21,10 @@ export default function Home() {
   // Processing
   const [progressText, setProgressText] = useState('');
   
+  // Persistence & History
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+
   // Gallery
   const [clips, setClips] = useState<string[]>([]);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
@@ -27,10 +32,113 @@ export default function Home() {
   const [shotNotes, setShotNotes] = useState<string[]>([]);
   const [showNotes, setShowNotes] = useState(false);
 
-  // Telestrator (Drawing) State
+  // Line Tool State
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [drawColor, setDrawColor] = useState('#22c55e'); // Green
+  const [lines, setLines] = useState<{start: {x: number, y: number}, end: {x: number, y: number}}[]>([]);
+  const [currentLine, setCurrentLine] = useState<{start: {x: number, y: number}, end: {x: number, y: number}} | null>(null);
+  const [draggedHandle, setDraggedHandle] = useState<{lineIndex: number, handle: 'start' | 'end'} | null>(null);
+  const [drawColor] = useState('#22c55e'); // Green
+
+  // Redraw canvas whenever lines change
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = drawColor;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+
+    const drawLine = (l: {start: {x: number, y: number}, end: {x: number, y: number}}, isCurrent = false) => {
+      ctx.beginPath();
+      ctx.moveTo(l.start.x, l.start.y);
+      ctx.lineTo(l.end.x, l.end.y);
+      ctx.strokeStyle = drawColor;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Draw handles
+      const drawHandle = (p: {x: number, y: number}) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+        ctx.fillStyle = isCurrent ? '#3b82f6' : 'white'; // Blue if creating, White if existing
+        ctx.fill();
+        ctx.strokeStyle = drawColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      };
+
+      drawHandle(l.start);
+      drawHandle(l.end);
+    };
+
+    lines.forEach((l) => drawLine(l));
+    if (currentLine) drawLine(currentLine, true);
+  }, [lines, currentLine, drawColor]);
+
+  // Handle Line Drawing Logic
+  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ('touches' in e) ? e.touches[0].clientX - rect.left : (e as React.MouseEvent).clientX - rect.left;
+    const y = ('touches' in e) ? e.touches[0].clientY - rect.top : (e as React.MouseEvent).clientY - rect.top;
+
+    // Check if we're grabbing an existing handle
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const distStart = Math.sqrt((x - line.start.x) ** 2 + (y - line.start.y) ** 2);
+      const distEnd = Math.sqrt((x - line.end.x) ** 2 + (y - line.end.y) ** 2);
+
+      if (distStart < 15) {
+        setDraggedHandle({ lineIndex: i, handle: 'start' });
+        return;
+      }
+      if (distEnd < 15) {
+        setDraggedHandle({ lineIndex: i, handle: 'end' });
+        return;
+      }
+    }
+
+    // Otherwise, start a new line
+    setCurrentLine({ start: { x, y }, end: { x, y } });
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ('touches' in e) ? e.touches[0].clientX - rect.left : (e as React.MouseEvent).clientX - rect.left;
+    const y = ('touches' in e) ? e.touches[0].clientY - rect.top : (e as React.MouseEvent).clientY - rect.top;
+
+    if (draggedHandle) {
+      const newLines = [...lines];
+      const line = newLines[draggedHandle.lineIndex];
+      if (draggedHandle.handle === 'start') {
+        line.start = { x, y };
+      } else {
+        line.end = { x, y };
+      }
+      setLines(newLines);
+    } else if (currentLine) {
+      setCurrentLine({ ...currentLine, end: { x, y } });
+    }
+  };
+
+  const stopDrawing = () => {
+    if (currentLine) {
+      setLines([...lines, currentLine]);
+      setCurrentLine(null);
+    }
+    setDraggedHandle(null);
+  };
+
+  const clearCanvas = () => {
+    setLines([]);
+    setCurrentLine(null);
+  };
 
   // Player state
   const mainVideoRef = useRef<HTMLVideoElement>(null);
@@ -104,49 +212,95 @@ export default function Home() {
     }
   }, [selectedClipIndex]);
 
-  // Handle Drawing Logic
-  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = ('touches' in e) ? e.touches[0].clientX - rect.left : (e as React.MouseEvent).clientX - rect.left;
-    const y = ('touches' in e) ? e.touches[0].clientY - rect.top : (e as React.MouseEvent).clientY - rect.top;
-
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.strokeStyle = drawColor;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    setIsDrawing(true);
+  // DB Operations
+  const loadHistory = async () => {
+    try {
+      const data = await getAllSessions();
+      setSessions(data);
+    } catch (err) {
+      console.error("Error loading history:", err);
+    }
   };
 
-  const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  const persistSession = async (clipUrls: string[], notes: string[]) => {
+    try {
+      const clipBlobs = await Promise.all(clipUrls.map(async (url, idx) => {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        return { blob, shotNote: notes[idx] || '' };
+      }));
 
-    const rect = canvas.getBoundingClientRect();
-    const x = ('touches' in e) ? e.touches[0].clientX - rect.left : (e as React.MouseEvent).clientX - rect.left;
-    const y = ('touches' in e) ? e.touches[0].clientY - rect.top : (e as React.MouseEvent).clientY - rect.top;
+      const sessionId = Date.now();
+      const newSession: Session = {
+        id: sessionId,
+        date: new Date(),
+        sessionNotes: '',
+        clips: clipBlobs
+      };
 
-    ctx.lineTo(x, y);
-    ctx.stroke();
+      await saveSession(newSession);
+      setCurrentSessionId(sessionId);
+      await loadHistory();
+    } catch (err) {
+      console.error("Error persisting session:", err);
+    }
   };
 
-  const stopDrawing = () => {
-    setIsDrawing(false);
+  const updateNotesInDB = useCallback(async () => {
+    if (currentSessionId === null) return;
+    try {
+      // Find session to get its existing blobs
+      const allSessions = await getAllSessions();
+      const currentSession = allSessions.find(s => s.id === currentSessionId);
+      if (!currentSession) return;
+
+      const updatedSession: Session = {
+        ...currentSession,
+        sessionNotes,
+        clips: currentSession.clips.map((clip, idx) => ({
+          ...clip,
+          shotNote: shotNotes[idx] || ''
+        }))
+      };
+      await saveSession(updatedSession);
+    } catch (err) {
+      console.error("Error updating notes in DB:", err);
+    }
+  }, [currentSessionId, sessionNotes, shotNotes]);
+
+  // Debounce note syncing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (appState === 'gallery') updateNotesInDB();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [sessionNotes, shotNotes, updateNotesInDB, appState]);
+
+  const loadSession = (session: Session) => {
+    // Clear old URLs
+    clips.forEach(url => URL.revokeObjectURL(url));
+    
+    const newUrls = session.clips.map(c => URL.createObjectURL(c.blob));
+    const newShotNotes = session.clips.map(c => c.shotNote);
+    
+    setClips(newUrls);
+    setShotNotes(newShotNotes);
+    setSessionNotes(session.sessionNotes);
+    setCurrentSessionId(session.id);
+    setAppState('gallery');
   };
 
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+  const deleteHistorySession = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    if (confirm("Delete this session forever?")) {
+      await deleteSession(id);
+      await loadHistory();
+      if (currentSessionId === id) {
+        setClips([]);
+        setShotNotes([]);
+        setSessionNotes('');
+        setCurrentSessionId(null);
+      }
     }
   };
 
@@ -175,6 +329,10 @@ export default function Home() {
     };
   }, [appState, startCamera]);
 
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
   const toggleCamera = () => { if (!isRecording) setFacingMode(prev => prev === 'user' ? 'environment' : 'user'); };
 
   const startRecording = useCallback(() => {
@@ -199,7 +357,9 @@ export default function Home() {
         setProgressText(`Found ${impacts.length} swings. Processing clips...`);
         const generatedClips = await processSwings(fullVideoBlob, impacts, setProgressText);
         setClips(generatedClips);
-        setShotNotes(new Array(generatedClips.length).fill(''));
+        const initialNotes = new Array(generatedClips.length).fill('');
+        setShotNotes(initialNotes);
+        await persistSession(generatedClips, initialNotes);
         setAppState('gallery');
       } catch (err) {
         console.error("Processing error:", err);
@@ -297,12 +457,61 @@ export default function Home() {
           <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
              <div className="flex flex-col items-end gap-3">
-               {!isRecording && <button onClick={toggleCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><RefreshCw className="w-6 h-6 text-white" /></button>}
+               {!isRecording && (
+                <div className="flex gap-3">
+                  <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><History className="w-6 h-6 text-white" /></button>
+                  <button onClick={toggleCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><RefreshCw className="w-6 h-6 text-white" /></button>
+                </div>
+               )}
              </div>
           </div>
           <div className="absolute inset-x-0 bottom-0 pb-12 pt-24 bg-gradient-to-t from-black/80 to-transparent z-10 flex flex-col items-center justify-end">
             {isRecording && <div className="mb-6 flex items-center space-x-2 text-red-500 font-bold animate-pulse"><div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div><span className="drop-shadow-md uppercase tracking-widest text-xs text-white">Recording</span></div>}
             <button onClick={isRecording ? stopRecording : startRecording} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 ${isRecording ? "bg-red-500 scale-90" : "bg-white hover:bg-gray-200"}`}>{isRecording ? <Square className="text-white w-8 h-8 fill-current" /> : <div className="w-16 h-16 rounded-full border-4 border-black/10 bg-red-500 flex items-center justify-center"><Video className="text-white w-8 h-8" /></div>}</button>
+          </div>
+        </div>
+      )}
+
+      {appState === 'history' && (
+        <div className="flex-1 flex flex-col bg-gray-950 z-20 overflow-hidden">
+          <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
+             <div className="flex items-center gap-3">
+               <button onClick={() => setAppState('camera')} className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"><ChevronLeft className="w-5 h-5" /></button>
+               <div><h1 className="text-lg font-bold text-white">History</h1><p className="text-xs text-gray-400">{sessions.length} sessions saved</p></div>
+             </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {sessions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+                <History className="w-12 h-12 mb-4 opacity-20" />
+                <p>No saved sessions yet.</p>
+              </div>
+            ) : (
+              sessions.map((session) => (
+                <div key={session.id} onClick={() => loadSession(session)} className="bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg cursor-pointer hover:border-blue-500/50 transition-all active:scale-[0.98]">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="font-bold text-white">{new Date(session.id).toLocaleDateString()}</h3>
+                      <p className="text-xs text-gray-500">{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
+                    </div>
+                    <button onClick={(e) => deleteHistorySession(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                  {session.sessionNotes && (
+                    <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">"{session.sessionNotes}"</p>
+                  )}
+                  <div className="flex gap-2 mt-3 overflow-hidden h-12">
+                    {session.clips.slice(0, 5).map((clip, idx) => (
+                      <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
+                        <video src={URL.createObjectURL(clip.blob)} className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                    {session.clips.length > 5 && (
+                      <div className="h-full aspect-square bg-gray-800 rounded flex items-center justify-center text-[10px] font-bold text-gray-500">+{session.clips.length - 5}</div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
@@ -320,6 +529,7 @@ export default function Home() {
           <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
              <div><h1 className="text-lg font-bold text-white">Session Gallery</h1><p className="text-xs text-gray-400">{clips.length} swings captured</p></div>
              <div className="flex gap-2">
+               <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><History className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">History</span></button>
                <button onClick={downloadAllAsZip} className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"><Archive className="w-4 h-4 text-white" /><span className="text-sm font-semibold text-white">ZIP All</span></button>
                <button onClick={resetApp} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><RotateCcw className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">New</span></button>
              </div>
@@ -434,7 +644,7 @@ export default function Home() {
                 <div className="flex flex-col text-white pointer-events-auto">
                   <h2 className="text-lg font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
                   <div className="flex gap-2 mt-1">
-                    <button onClick={clearCanvas} className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-800 text-gray-400 hover:text-white transition-colors"><Eraser className="w-3 h-3" /> Clear Ink</button>
+                    <button onClick={clearCanvas} className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-800 text-gray-400 hover:text-white transition-colors"><Eraser className="w-3 h-3" /> Clear Lines</button>
                     <button onClick={() => setShowNotes(!showNotes)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${showNotes ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}><FileText className="w-3 h-3" /> Notes {showNotes ? 'ON' : 'OFF'}</button>
                   </div>
                 </div>
