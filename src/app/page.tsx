@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Crosshair, Search } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
 import JSZip from 'jszip';
@@ -14,6 +14,7 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [ballPosition, setBallPosition] = useState({ x: 50, y: 75 }); 
   
   // Processing
   const [progressText, setProgressText] = useState('');
@@ -23,12 +24,51 @@ export default function Home() {
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
   const [sessionNotes, setSessionNotes] = useState('');
   const [shotNotes, setShotNotes] = useState<string[]>([]);
+  const [showImpactZoom, setShowImpactZoom] = useState(false);
+
+  // Synchronized Inset Video logic
+  const mainVideoRef = useRef<HTMLVideoElement>(null);
+  const insetVideoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const main = mainVideoRef.current;
+    const inset = insetVideoRef.current;
+
+    if (selectedClipIndex !== null && showImpactZoom && main && inset) {
+      // Sync initial state
+      inset.currentTime = main.currentTime;
+      
+      const handleSync = () => {
+        if (Math.abs(inset.currentTime - main.currentTime) > 0.1) {
+          inset.currentTime = main.currentTime;
+        }
+      };
+      const handlePlay = () => inset.play().catch(() => {});
+      const handlePause = () => inset.pause();
+
+      main.addEventListener('play', handlePlay);
+      main.addEventListener('pause', handlePause);
+      main.addEventListener('timeupdate', handleSync);
+      main.addEventListener('seeking', handleSync);
+
+      if (!main.paused) {
+        handlePlay();
+      }
+
+      return () => {
+        main.removeEventListener('play', handlePlay);
+        main.removeEventListener('pause', handlePause);
+        main.removeEventListener('timeupdate', handleSync);
+        main.removeEventListener('seeking', handleSync);
+      };
+    }
+  }, [selectedClipIndex, showImpactZoom, clips]);
 
   // Initialize camera
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: true
       });
       if (videoRef.current) {
@@ -45,7 +85,6 @@ export default function Home() {
       startCamera();
     }
     
-    // Cleanup
     return () => {
       if (videoRef.current?.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
@@ -53,6 +92,14 @@ export default function Home() {
       }
     };
   }, [appState, startCamera]);
+
+  const handleCameraTap = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isRecording) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    setBallPosition({ x, y });
+  };
 
   // Handle Recording
   const startRecording = useCallback(() => {
@@ -97,7 +144,6 @@ export default function Home() {
       }
     };
     
-    // Add small delay to let stream warm up
     setTimeout(() => {
       mediaRecorder.start(200); 
       setIsRecording(true);
@@ -143,24 +189,18 @@ export default function Home() {
         alert("Sharing is not supported on this device/browser. Use the download button instead.");
         return;
       }
-
       const response = await fetch(url);
       const blob = await response.blob();
       const file = new File([blob], `swing_${index + 1}.webm`, { type: blob.type });
-
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
           title: `SwingClips - Swing #${index + 1}`,
           text: 'Check out my golf swing!',
         });
-      } else {
-        alert("Your browser supports sharing, but not for this specific file type.");
       }
     } catch (err) {
-      if ((err as any).name !== 'AbortError') {
-        console.error("Error sharing:", err);
-      }
+      if ((err as any).name !== 'AbortError') console.error("Error sharing:", err);
     }
   };
 
@@ -168,52 +208,37 @@ export default function Home() {
     const originalText = progressText;
     setProgressText("Creating ZIP archive...");
     setAppState('processing');
-    
     const zip = new JSZip();
-    
-    // Add individual clips
     for (let i = 0; i < clips.length; i++) {
       const response = await fetch(clips[i]);
       const blob = await response.blob();
       zip.file(`swing_${i + 1}.webm`, blob);
     }
-
-    // Generate Session Report TXT
     let reportText = `GOLF SESSION REPORT - ${new Date().toLocaleString()}\n`;
     reportText += `==========================================\n\n`;
-    reportText += `SESSION NOTES:\n`;
-    reportText += `${sessionNotes || "No session notes recorded."}\n\n`;
-    reportText += `------------------------------------------\n`;
-    reportText += `INDIVIDUAL SWING NOTES:\n\n`;
-    
+    reportText += `SESSION NOTES:\n${sessionNotes || "No session notes."}\n\n`;
     shotNotes.forEach((note, idx) => {
-      reportText += `SWING #${idx + 1}:\n`;
-      reportText += `${note || "No notes for this swing."}\n\n`;
+      reportText += `SWING #${idx + 1}:\n${note || "No notes."}\n\n`;
     });
-
     zip.file("session_report.txt", reportText);
-    
     const content = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(content);
-    
     const a = document.createElement('a');
     a.href = url;
     a.download = `golf_session_${new Date().toISOString().split('T')[0]}.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    
     URL.revokeObjectURL(url);
     setProgressText(originalText);
     setAppState('gallery');
   };
 
-  // Render Views
   return (
-    <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden">
+    <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden select-none">
       
       {appState === 'camera' && (
-        <>
+        <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden" onClick={handleCameraTap}>
           <video 
             ref={videoRef} 
             autoPlay 
@@ -221,130 +246,84 @@ export default function Home() {
             muted 
             className="w-full h-full object-cover absolute inset-0 z-0"
           />
+          
+          {/* Target Zone Overlay */}
+          {!isRecording && (
+            <div 
+              className="absolute z-10 flex flex-col items-center pointer-events-none transition-all duration-300"
+              style={{ left: `${ballPosition.x}%`, top: `${ballPosition.y}%`, transform: 'translate(-50%, -50%)' }}
+            >
+               <div className="w-16 h-16 border-2 border-dashed border-blue-400 rounded-full flex items-center justify-center animate-pulse bg-blue-400/10">
+                  <Crosshair className="w-6 h-6 text-blue-400" />
+               </div>
+               <span className="mt-2 text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">Align Ball</span>
+            </div>
+          )}
+
           <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
+             {!isRecording && <div className="text-[10px] bg-blue-600/80 px-2 py-1 rounded text-white font-bold uppercase">Tap Screen to Set Ball Position</div>}
           </div>
           
           <div className="absolute inset-x-0 bottom-0 pb-12 pt-24 bg-gradient-to-t from-black/80 to-transparent z-10 flex flex-col items-center justify-end">
             {isRecording && (
               <div className="mb-6 flex items-center space-x-2 text-red-500 font-bold animate-pulse">
                 <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div>
-                <span className="drop-shadow-md">Recording</span>
+                <span className="drop-shadow-md uppercase tracking-widest text-xs text-white">Recording</span>
               </div>
             )}
             
             <button
-              onClick={isRecording ? stopRecording : startRecording}
-              className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg ${
-                isRecording 
-                  ? "bg-red-500 hover:bg-red-600 scale-90" 
-                  : "bg-white hover:bg-gray-200"
+              onClick={(e) => { e.stopPropagation(); isRecording ? stopRecording() : startRecording(); }}
+              className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 ${
+                isRecording ? "bg-red-500 scale-90" : "bg-white hover:bg-gray-200"
               }`}
             >
-              {isRecording ? (
-                <Square className="text-white w-8 h-8 fill-current" />
-              ) : (
-                <div className="w-16 h-16 rounded-full border-4 border-black/10 bg-red-500 flex items-center justify-center">
-                   <Video className="text-white w-8 h-8" />
-                </div>
-              )}
+              {isRecording ? <Square className="text-white w-8 h-8 fill-current" /> : <div className="w-16 h-16 rounded-full border-4 border-black/10 bg-red-500 flex items-center justify-center"><Video className="text-white w-8 h-8" /></div>}
             </button>
           </div>
-        </>
+        </div>
       )}
 
       {appState === 'processing' && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center z-20 bg-gray-900">
           <Loader2 className="w-16 h-16 animate-spin text-blue-500 mb-6" />
-          <h2 className="text-2xl font-bold mb-2">Processing</h2>
+          <h2 className="text-2xl font-bold mb-2 uppercase tracking-tighter text-white">Processing</h2>
           <p className="text-gray-400 font-medium">{progressText}</p>
         </div>
       )}
 
       {appState === 'gallery' && (
         <div className="flex-1 flex flex-col bg-gray-950 z-20 overflow-hidden">
-          {/* Gallery Header */}
           <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
              <div>
-               <h1 className="text-lg font-bold">Session Gallery</h1>
+               <h1 className="text-lg font-bold text-white">Session Gallery</h1>
                <p className="text-xs text-gray-400">{clips.length} swings captured</p>
              </div>
              <div className="flex gap-2">
-               <button 
-                 onClick={downloadAllAsZip}
-                 className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"
-               >
-                 <Archive className="w-4 h-4 text-white" />
-                 <span className="text-sm font-semibold">ZIP All</span>
-               </button>
-               <button 
-                 onClick={resetApp} 
-                 className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"
-               >
-                 <RotateCcw className="w-4 h-4 text-gray-300" />
-                 <span className="text-sm font-semibold text-gray-300">New</span>
-               </button>
+               <button onClick={downloadAllAsZip} className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"><Archive className="w-4 h-4 text-white" /><span className="text-sm font-semibold text-white">ZIP All</span></button>
+               <button onClick={resetApp} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><RotateCcw className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">New</span></button>
              </div>
           </div>
           
           <div className="flex-1 overflow-y-auto bg-gray-950">
-             {/* Session Notes Section */}
              <div className="p-4 max-w-7xl mx-auto w-full">
                <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6 shadow-lg">
-                  <div className="flex items-center gap-2 mb-2 text-blue-400">
-                    <ClipboardList className="w-5 h-5" />
-                    <h3 className="font-bold text-sm uppercase tracking-wider">Overall Session Notes</h3>
-                  </div>
-                  <textarea 
-                    value={sessionNotes}
-                    onChange={(e) => setSessionNotes(e.target.value)}
-                    placeholder="e.g. Club: 7-Iron, Focus: Keeping head still..."
-                    className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[80px]"
-                  />
+                  <div className="flex items-center gap-2 mb-2 text-blue-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider">Overall Session Notes</h3></div>
+                  <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Club: 7-Iron, Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[80px]" />
                </div>
-
-               {/* Grid Section */}
                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                   {clips.map((clipUrl, idx) => (
-                    <div 
-                      key={idx} 
-                      onClick={() => setSelectedClipIndex(idx)}
-                      className="relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 cursor-pointer active:scale-95 transition-transform"
-                    >
+                    <div key={idx} onClick={() => setSelectedClipIndex(idx)} className="relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 cursor-pointer active:scale-95 transition-transform">
                       <div className="aspect-[3/4] bg-black relative">
-                        <video 
-                          src={clipUrl}
-                          className="w-full h-full object-cover pointer-events-none"
-                          muted
-                          playsInline
-                        />
-                        {shotNotes[idx] && (
-                           <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg">
-                              <FileText className="w-3 h-3 text-white" />
-                           </div>
-                        )}
+                        <video src={clipUrl} className="w-full h-full object-cover pointer-events-none" muted playsInline />
+                        {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
                       </div>
                       <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
                          <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
                          <div className="flex gap-2">
-                           <button 
-                             onClick={(e) => {
-                               e.stopPropagation();
-                               shareClip(clipUrl, idx);
-                             }}
-                             className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"
-                           >
-                             <Share2 className="w-4 h-4" />
-                           </button>
-                           <button 
-                             onClick={(e) => {
-                               e.stopPropagation();
-                               downloadClip(clipUrl, idx);
-                             }}
-                             className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"
-                           >
-                             <Download className="w-4 h-4" />
-                           </button>
+                           <button onClick={(e) => { e.stopPropagation(); shareClip(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"><Share2 className="w-4 h-4" /></button>
+                           <button onClick={(e) => { e.stopPropagation(); downloadClip(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"><Download className="w-4 h-4" /></button>
                          </div>
                       </div>
                     </div>
@@ -353,101 +332,57 @@ export default function Home() {
              </div>
           </div>
 
-          {/* Fullscreen Modal Viewer */}
           {selectedClipIndex !== null && (
             <div className="fixed inset-0 z-50 bg-black flex flex-col">
-              {/* Modal Header */}
               <div className="p-6 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent absolute top-0 inset-x-0 z-50">
                 <div className="flex flex-col text-white">
                   <h2 className="text-lg font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
-                  <p className="text-xs text-gray-400">Previewing individual clip</p>
+                  <button onClick={() => setShowImpactZoom(!showImpactZoom)} className={`mt-1 flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${showImpactZoom ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}><Search className="w-3 h-3" /> Impact Zoom {showImpactZoom ? 'ON' : 'OFF'}</button>
                 </div>
                 <div className="flex items-center gap-3">
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      shareClip(clips[selectedClipIndex!], selectedClipIndex!);
-                    }}
-                    className="p-3 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"
-                  >
-                    <Share2 className="w-5 h-5" />
-                  </button>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      downloadClip(clips[selectedClipIndex!], selectedClipIndex!);
-                    }}
-                    className="p-3 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"
-                  >
-                    <Download className="w-5 h-5" />
-                  </button>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedClipIndex(null);
-                    }}
-                    className="p-3 bg-gray-800 rounded-full text-white shadow-lg active:scale-90 transition-transform"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); shareClip(clips[selectedClipIndex!], selectedClipIndex!); }} className="p-3 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"><Share2 className="w-5 h-5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); downloadClip(clips[selectedClipIndex!], selectedClipIndex!); }} className="p-3 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"><Download className="w-5 h-5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(null); }} className="p-3 bg-gray-800 rounded-full text-white shadow-lg active:scale-90 transition-transform"><X className="w-5 h-5" /></button>
                 </div>
               </div>
 
-              {/* Video Player Container */}
-              <div className="flex-1 relative flex items-center justify-center p-4 bg-black">
-                <video 
-                  key={clips[selectedClipIndex]}
-                  src={clips[selectedClipIndex]}
-                  autoPlay
-                  loop
-                  playsInline
-                  controls
-                  className="max-w-full max-h-full md:rounded-lg shadow-2xl"
-                />
+              <div className="flex-1 relative flex items-center justify-center bg-black">
+                <video ref={mainVideoRef} key={clips[selectedClipIndex]} src={clips[selectedClipIndex]} autoPlay loop playsInline controls className="max-w-full max-h-full md:rounded-lg shadow-2xl" />
                 
-                {/* Navigation Arrows */}
+                {/* Impact Inset Zoom */}
+                {showImpactZoom && (
+                  <div className="absolute top-24 left-6 w-32 h-32 md:w-64 md:h-64 rounded-xl border-2 border-blue-500 overflow-hidden shadow-2xl z-40 bg-black animate-in zoom-in duration-300 ring-4 ring-black/50">
+                     <video 
+                       ref={insetVideoRef}
+                       src={clips[selectedClipIndex]}
+                       muted
+                       playsInline
+                       className="w-full h-full object-cover"
+                       style={{
+                         transform: 'scale(8)', // Balanced at 8x magnification
+                         transformOrigin: `${ballPosition.x}% ${ballPosition.y}%`,
+                         imageRendering: 'pixelated' // Keep edges sharp at high zoom
+                       }}
+                     />
+                     <div className="absolute inset-0 border border-blue-400/30 pointer-events-none"></div>
+                     <div className="absolute bottom-1 right-1 bg-blue-600 text-[10px] font-bold px-2 py-0.5 rounded text-white uppercase tracking-tighter shadow-lg">Impact Zone (8x)</div>
+                  </div>
+                )}
+
                 <div className="absolute inset-x-4 flex items-center justify-between pointer-events-none">
-                  <button 
-                    disabled={selectedClipIndex === 0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedClipIndex(selectedClipIndex - 1);
-                    }}
-                    className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === 0 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}
-                  >
-                    <ChevronLeft className="w-8 h-8" />
-                  </button>
-                  <button 
-                    disabled={selectedClipIndex === clips.length - 1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedClipIndex(selectedClipIndex + 1);
-                    }}
-                    className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === clips.length - 1 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}
-                  >
-                    <ChevronRight className="w-8 h-8" />
-                  </button>
+                  <button disabled={selectedClipIndex === 0} onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(selectedClipIndex - 1); }} className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === 0 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}><ChevronLeft className="w-8 h-8" /></button>
+                  <button disabled={selectedClipIndex === clips.length - 1} onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(selectedClipIndex + 1); }} className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === clips.length - 1 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}><ChevronRight className="w-8 h-8" /></button>
                 </div>
               </div>
 
-              {/* Shot Notes Sidebar/Bottom Panel */}
               <div className="p-6 bg-gray-950 border-t border-gray-800 animate-in slide-in-from-bottom duration-300">
-                <div className="flex items-center gap-2 mb-3 text-blue-400">
-                   <FileText className="w-5 h-5" />
-                   <h3 className="font-bold text-sm uppercase tracking-wider">Swing Notes</h3>
-                </div>
-                <textarea 
-                  value={shotNotes[selectedClipIndex]}
-                  onChange={(e) => updateShotNote(selectedClipIndex, e.target.value)}
-                  placeholder="Record feedback for this swing..."
-                  className="w-full bg-black border border-gray-800 rounded-xl p-4 text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[100px]"
-                />
+                <div className="flex items-center gap-2 mb-3 text-blue-400"><FileText className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Swing Notes</h3></div>
+                <textarea value={shotNotes[selectedClipIndex]} onChange={(e) => updateShotNote(selectedClipIndex, e.target.value)} placeholder="Record feedback for this swing..." className="w-full bg-black border border-gray-800 rounded-xl p-4 text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[100px]" />
               </div>
             </div>
           )}
         </div>
       )}
-
     </main>
   );
 }
