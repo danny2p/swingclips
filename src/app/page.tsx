@@ -352,7 +352,7 @@ export default function Home() {
         >
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover absolute inset-0 z-0" />
           {!isRecording && (
-            <div className="absolute z-10 flex flex-col items-center pointer-events-none transition-all duration-300" style={{ left: `${ballPosition.x}%`, top: `${ballPosition.y}%`, transform: 'translate(-50%, -50%)' }}>
+            <div className="absolute z-10 flex flex-col items-center pointer-events-none" style={{ left: `${ballPosition.x}%`, top: `${ballPosition.y}%`, transform: 'translate(-50%, -50%)' }}>
                <div className="w-16 h-16 border-2 border-dashed border-blue-400 rounded-full flex items-center justify-center animate-pulse bg-blue-400/10"><Crosshair className="w-6 h-6 text-blue-400" /></div>
                <span className="mt-2 text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">Align Ball</span>
             </div>
