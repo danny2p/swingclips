@@ -11,7 +11,7 @@ export async function detectImpacts(videoBlob: Blob): Promise<number[]> {
   const sampleRate = audioBuffer.sampleRate;
   
   const impacts: number[] = [];
-  const minTimeBetweenImpacts = 4.0; 
+  const minTimeBetweenImpacts = 3.0; 
   const startDelay = 0.5; // Ignore impacts for the first 500ms to avoid mic pops
   
   // Use a 20ms window for fine-grained transient detection
@@ -30,8 +30,8 @@ export async function detectImpacts(videoBlob: Blob): Promise<number[]> {
     if (sum > maxEnergy) maxEnergy = sum;
   }
   
-  // Set threshold to 60% of the maximum recorded volume.
-  const threshold = maxEnergy * 0.6; 
+  // Set threshold to 30% of the maximum recorded volume.
+  const threshold = maxEnergy * 0.3; 
   
   for (let i = 0; i < energyValues.length; i++) {
     const timeInSeconds = (i * windowSize) / sampleRate;

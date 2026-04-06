@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Crosshair, Search, RefreshCw, Pencil, Eraser } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Crosshair, Search, RefreshCw, Pencil, Eraser, Play, Pause } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
 import JSZip from 'jszip';
@@ -32,6 +32,50 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawColor, setDrawColor] = useState('#22c55e'); // Green
+
+  // Player state
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  const togglePlay = () => {
+    if (mainVideoRef.current) {
+      if (mainVideoRef.current.paused) {
+        mainVideoRef.current.play();
+        setIsPlaying(true);
+      } else {
+        mainVideoRef.current.pause();
+        setIsPlaying(false);
+      }
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (mainVideoRef.current) {
+      setCurrentTime(mainVideoRef.current.currentTime);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (mainVideoRef.current) {
+      setDuration(mainVideoRef.current.duration);
+    }
+  };
+
+  const handleScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value);
+    if (mainVideoRef.current) {
+      mainVideoRef.current.currentTime = time;
+      setCurrentTime(time);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedClipIndex !== null) {
+      setIsPlaying(true);
+      setCurrentTime(0);
+    }
+  }, [selectedClipIndex]);
 
   // Synchronized Inset Video logic
   const mainVideoRef = useRef<HTMLVideoElement>(null);
@@ -330,13 +374,25 @@ export default function Home() {
               </div>
 
               <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
-                <video ref={mainVideoRef} key={clips[selectedClipIndex]} src={clips[selectedClipIndex]} autoPlay loop playsInline controls className="max-w-full max-h-full md:rounded-lg shadow-2xl" />
+                <video 
+                  ref={mainVideoRef} 
+                  key={clips[selectedClipIndex]} 
+                  src={clips[selectedClipIndex]} 
+                  autoPlay 
+                  loop 
+                  playsInline 
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  className="max-w-full max-h-full md:rounded-lg shadow-2xl" 
+                />
                 
                 {/* Telestrator Canvas */}
-                <canvas 
+                <canvas
                   ref={canvasRef}
-                  width={window.innerWidth}
-                  height={window.innerHeight}
+                  width={typeof window !== 'undefined' ? window.innerWidth : 1920}
+                  height={typeof window !== 'undefined' ? window.innerHeight : 1080}
                   onMouseDown={startDrawing}
                   onMouseMove={draw}
                   onMouseUp={stopDrawing}
@@ -346,6 +402,42 @@ export default function Home() {
                   onTouchEnd={stopDrawing}
                   className="absolute inset-0 z-30 cursor-crosshair touch-none"
                 />
+
+                {/* Custom Video Controls */}
+                <div className="absolute bottom-6 inset-x-0 z-40 px-6 pointer-events-none">
+                  <div className="max-w-3xl mx-auto w-full flex flex-col gap-2 pointer-events-auto">
+                    {/* Scrubber */}
+                    <div className="w-full flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 shadow-2xl">
+                      <button 
+                        onClick={togglePlay} 
+                        className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
+                      >
+                        {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
+                      </button>
+                      
+                      <div className="flex-1 flex items-center group relative h-6">
+                        <input 
+                          type="range"
+                          min="0"
+                          max={duration || 0}
+                          step="0.001"
+                          value={currentTime}
+                          onChange={handleScrub}
+                          className="w-full h-1.5 bg-gray-600 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all focus:outline-none"
+                        />
+                        {/* Custom Progress Bar background to show "filled" portion */}
+                        <div 
+                          className="absolute left-0 top-[10px] h-1.5 bg-blue-500 rounded-full pointer-events-none"
+                          style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                        />
+                      </div>
+                      
+                      <span className="text-[10px] font-mono text-gray-300 w-16 text-right">
+                        {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
                 {showImpactZoom && (
                   <div className="absolute top-24 left-6 w-32 h-32 md:w-64 md:h-64 rounded-xl border-2 border-blue-500 overflow-hidden shadow-2xl z-40 bg-black animate-in zoom-in duration-300 ring-4 ring-black/50">
