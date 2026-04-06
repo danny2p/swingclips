@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Crosshair, Search, RefreshCw, Pencil, Eraser, Play, Pause } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Crosshair, Search, RefreshCw, Pencil, Eraser, Play, Pause, Gauge } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
 import JSZip from 'jszip';
@@ -38,6 +38,7 @@ export default function Home() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const wasPlayingBeforeScrub = useRef(false);
 
   const togglePlay = () => {
@@ -49,6 +50,17 @@ export default function Home() {
         mainVideoRef.current.pause();
         setIsPlaying(false);
       }
+    }
+  };
+
+  const togglePlaybackRate = () => {
+    const newRate = playbackRate === 1 ? 0.25 : 1;
+    setPlaybackRate(newRate);
+    if (mainVideoRef.current) {
+      mainVideoRef.current.playbackRate = newRate;
+    }
+    if (insetVideoRef.current) {
+      insetVideoRef.current.playbackRate = newRate;
     }
   };
 
@@ -91,6 +103,7 @@ export default function Home() {
     if (selectedClipIndex !== null) {
       setIsPlaying(true);
       setCurrentTime(0);
+      setPlaybackRate(1);
     }
   }, [selectedClipIndex]);
 
@@ -344,16 +357,33 @@ export default function Home() {
                <span className="mt-2 text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">Align Ball</span>
             </div>
           )}
-          <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
+          <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent" onClick={(e) => e.stopPropagation()}>
              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
-             <div className="flex flex-col items-end gap-3">
-               {!isRecording && <button onClick={(e) => { e.stopPropagation(); toggleCamera(); }} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><RefreshCw className="w-6 h-6 text-white" /></button>}
+             <div className="flex flex-col items-end gap-3" onClick={(e) => e.stopPropagation()}>
+               {!isRecording && <button 
+                onClick={(e) => { e.stopPropagation(); toggleCamera(); }} 
+                onMouseDown={(e) => e.stopPropagation()}
+                onMouseMove={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+                className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"
+              >
+                <RefreshCw className="w-6 h-6 text-white" />
+              </button>}
                {!isRecording && <div className="text-[10px] bg-blue-600/80 px-2 py-1 rounded text-white font-bold uppercase shadow-lg">Tap Screen to Set Ball Position</div>}
              </div>
           </div>
           <div className="absolute inset-x-0 bottom-0 pb-12 pt-24 bg-gradient-to-t from-black/80 to-transparent z-10 flex flex-col items-center justify-end">
             {isRecording && <div className="mb-6 flex items-center space-x-2 text-red-500 font-bold animate-pulse"><div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div><span className="drop-shadow-md uppercase tracking-widest text-xs text-white">Recording</span></div>}
-            <button onClick={(e) => { e.stopPropagation(); isRecording ? stopRecording() : startRecording(); }} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 ${isRecording ? "bg-red-500 scale-90" : "bg-white hover:bg-gray-200"}`}>{isRecording ? <Square className="text-white w-8 h-8 fill-current" /> : <div className="w-16 h-16 rounded-full border-4 border-black/10 bg-red-500 flex items-center justify-center"><Video className="text-white w-8 h-8" /></div>}</button>
+            <button onClick={(e) => { e.stopPropagation(); isRecording ? stopRecording() : startRecording(); }} 
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseMove={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+              className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 ${isRecording ? "bg-red-500 scale-90" : "bg-white hover:bg-gray-200"}`}
+            >
+              {isRecording ? <Square className="text-white w-8 h-8 fill-current" /> : <div className="w-16 h-16 rounded-full border-4 border-black/10 bg-red-500 flex items-center justify-center"><Video className="text-white w-8 h-8" /></div>}
+            </button>
           </div>
         </div>
       )}
@@ -471,6 +501,14 @@ export default function Home() {
                           style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                         />
                       </div>
+
+                      <button 
+                        onClick={togglePlaybackRate} 
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-all active:scale-90 border ${playbackRate === 0.25 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white/50 border-white/10 text-gray-300'}`}
+                      >
+                        <Gauge className="w-3.5 h-3.5" />
+                        <span className="text-[10px] font-bold">{playbackRate === 1 ? '1x' : '0.25x'}</span>
+                      </button>
                       
                       <span className="text-[10px] font-mono text-gray-300 w-16 text-right">
                         {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
