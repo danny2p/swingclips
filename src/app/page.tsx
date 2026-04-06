@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
 import JSZip from 'jszip';
@@ -126,6 +126,33 @@ export default function Home() {
     document.body.removeChild(a);
   };
 
+  const shareClip = async (url: string, index: number) => {
+    try {
+      if (!navigator.share) {
+        alert("Sharing is not supported on this device/browser. Use the download button instead.");
+        return;
+      }
+
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const file = new File([blob], `swing_${index + 1}.webm`, { type: blob.type });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `SwingClips - Swing #${index + 1}`,
+          text: 'Check out my golf swing!',
+        });
+      } else {
+        alert("Your browser supports sharing, but not for this specific file type.");
+      }
+    } catch (err) {
+      if ((err as any).name !== 'AbortError') {
+        console.error("Error sharing:", err);
+      }
+    }
+  };
+
   const downloadAllAsZip = async () => {
     setProgressText("Creating ZIP archive...");
     const zip = new JSZip();
@@ -147,7 +174,7 @@ export default function Home() {
     document.body.removeChild(a);
     
     URL.revokeObjectURL(url);
-    setProgressText(`Found ${clips.length} swings. Processing clips...`); // Restore original text
+    setProgressText(`Found ${clips.length} swings. Processing clips...`); 
   };
 
   // Render Views
@@ -229,23 +256,42 @@ export default function Home() {
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 bg-gray-950">
-             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-w-7xl mx-auto">
                 {clips.map((clipUrl, idx) => (
                   <div 
                     key={idx} 
                     onClick={() => setSelectedClipIndex(idx)}
                     className="relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 cursor-pointer active:scale-95 transition-transform"
                   >
-                    <video 
-                      src={clipUrl}
-                      className="w-full aspect-video object-cover pointer-events-none"
-                      muted
-                      playsInline
-                    />
-                    <div className="p-3 flex items-center justify-between">
+                    <div className="aspect-[3/4] bg-black relative">
+                      <video 
+                        src={clipUrl}
+                        className="w-full h-full object-cover pointer-events-none"
+                        muted
+                        playsInline
+                      />
+                    </div>
+                    <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
                        <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
-                       <div className="p-1.5 bg-gray-800 rounded-md text-blue-400">
-                         <Download className="w-4 h-4" />
+                       <div className="flex gap-2">
+                         <button 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             shareClip(clipUrl, idx);
+                           }}
+                           className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"
+                         >
+                           <Share2 className="w-4 h-4" />
+                         </button>
+                         <button 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             downloadClip(clipUrl, idx);
+                           }}
+                           className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"
+                         >
+                           <Download className="w-4 h-4" />
+                         </button>
                        </div>
                     </div>
                   </div>
@@ -262,7 +308,16 @@ export default function Home() {
                   <h2 className="text-lg font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
                   <p className="text-xs text-gray-400">Previewing individual clip</p>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      shareClip(clips[selectedClipIndex!], selectedClipIndex!);
+                    }}
+                    className="p-3 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"
+                  >
+                    <Share2 className="w-5 h-5" />
+                  </button>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
