@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
+import JSZip from 'jszip';
 
 export default function Home() {
   // App states: 'camera' | 'processing' | 'gallery'
@@ -19,7 +20,7 @@ export default function Home() {
   
   // Gallery
   const [clips, setClips] = useState<string[]>([]);
-  const [currentClipIndex, setCurrentClipIndex] = useState(0);
+  const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
 
   // Initialize camera
   const startCamera = useCallback(async () => {
@@ -56,7 +57,6 @@ export default function Home() {
     if (!videoRef.current?.srcObject) return;
     
     const stream = videoRef.current.srcObject as MediaStream;
-    // Attempt to use a common format that works well locally
     const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm;codecs=vp8,opus';
     const mediaRecorder = new MediaRecorder(stream, { mimeType });
     
@@ -70,7 +70,6 @@ export default function Home() {
     mediaRecorder.onstop = async () => {
       const fullVideoBlob = new Blob(chunks, { type: mediaRecorder.mimeType });
       
-      // Move to processing state
       setAppState('processing');
       setProgressText('Analyzing audio for impacts...');
       
@@ -87,7 +86,6 @@ export default function Home() {
         const generatedClips = await processSwings(fullVideoBlob, impacts, setProgressText);
         
         setClips(generatedClips);
-        setCurrentClipIndex(0);
         setAppState('gallery');
       } catch (err) {
         console.error("Processing error:", err);
@@ -96,8 +94,11 @@ export default function Home() {
       }
     };
     
-    mediaRecorder.start(200); // collect 200ms chunks
-    setIsRecording(true);
+    // Add small delay to let stream warm up
+    setTimeout(() => {
+      mediaRecorder.start(200); 
+      setIsRecording(true);
+    }, 100);
   }, []);
 
   const stopRecording = useCallback(() => {
@@ -108,9 +109,45 @@ export default function Home() {
   }, [isRecording]);
 
   const resetApp = () => {
-    clips.forEach(url => URL.revokeObjectURL(url));
-    setClips([]);
-    setAppState('camera');
+    if (confirm("Are you sure you want to start a new session? Current clips will be cleared.")) {
+      clips.forEach(url => URL.revokeObjectURL(url));
+      setClips([]);
+      setSelectedClipIndex(null);
+      setAppState('camera');
+    }
+  };
+
+  const downloadClip = (url: string, index: number) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `swing_${index + 1}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const downloadAllAsZip = async () => {
+    setProgressText("Creating ZIP archive...");
+    const zip = new JSZip();
+    
+    for (let i = 0; i < clips.length; i++) {
+      const response = await fetch(clips[i]);
+      const blob = await response.blob();
+      zip.file(`swing_${i + 1}.webm`, blob);
+    }
+    
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `golf_session_${new Date().toISOString().split('T')[0]}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    URL.revokeObjectURL(url);
+    setProgressText(`Found ${clips.length} swings. Processing clips...`); // Restore original text
   };
 
   // Render Views
@@ -161,53 +198,130 @@ export default function Home() {
       {appState === 'processing' && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center z-20 bg-gray-900">
           <Loader2 className="w-16 h-16 animate-spin text-blue-500 mb-6" />
-          <h2 className="text-2xl font-bold mb-2">Processing Swings</h2>
+          <h2 className="text-2xl font-bold mb-2">Processing</h2>
           <p className="text-gray-400 font-medium">{progressText}</p>
         </div>
       )}
 
-      {appState === 'gallery' && clips.length > 0 && (
-        <div className="flex-1 flex flex-col bg-gray-950 z-20">
+      {appState === 'gallery' && (
+        <div className="flex-1 flex flex-col bg-gray-950 z-20 overflow-hidden">
           <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
-             <h1 className="text-lg font-bold">Swing {currentClipIndex + 1} of {clips.length}</h1>
-             <button onClick={resetApp} className="p-2 bg-gray-800 hover:bg-gray-700 rounded-full transition-colors flex items-center gap-2 pr-4">
-               <RotateCcw className="w-5 h-5 text-gray-300" />
-               <span className="text-sm font-medium text-gray-300">New Session</span>
-             </button>
+             <div>
+               <h1 className="text-lg font-bold">Session Gallery</h1>
+               <p className="text-xs text-gray-400">{clips.length} swings captured</p>
+             </div>
+             <div className="flex gap-2">
+               <button 
+                 onClick={downloadAllAsZip}
+                 className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"
+               >
+                 <Archive className="w-4 h-4 text-white" />
+                 <span className="text-sm font-semibold">ZIP All</span>
+               </button>
+               <button 
+                 onClick={resetApp} 
+                 className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"
+               >
+                 <RotateCcw className="w-4 h-4 text-gray-300" />
+                 <span className="text-sm font-semibold text-gray-300">New</span>
+               </button>
+             </div>
           </div>
           
-          <div className="flex-1 relative flex items-center justify-center bg-black">
-             <video 
-               key={clips[currentClipIndex]}
-               src={clips[currentClipIndex]}
-               autoPlay
-               loop
-               playsInline
-               controls
-               className="w-full h-full object-contain"
-             />
-             
-             {/* Carousel Controls */}
-             <div className="absolute inset-y-0 left-0 flex items-center px-4">
-               <button 
-                 onClick={() => setCurrentClipIndex(Math.max(0, currentClipIndex - 1))}
-                 disabled={currentClipIndex === 0}
-                 className="p-3 bg-black/60 hover:bg-black/80 rounded-full text-white disabled:opacity-0 transition-opacity backdrop-blur-sm"
-               >
-                 <ChevronLeft className="w-8 h-8" />
-               </button>
-             </div>
-             
-             <div className="absolute inset-y-0 right-0 flex items-center px-4">
-               <button 
-                 onClick={() => setCurrentClipIndex(Math.min(clips.length - 1, currentClipIndex + 1))}
-                 disabled={currentClipIndex === clips.length - 1}
-                 className="p-3 bg-black/60 hover:bg-black/80 rounded-full text-white disabled:opacity-0 transition-opacity backdrop-blur-sm"
-               >
-                 <ChevronRight className="w-8 h-8" />
-               </button>
+          <div className="flex-1 overflow-y-auto p-4 bg-gray-950">
+             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {clips.map((clipUrl, idx) => (
+                  <div 
+                    key={idx} 
+                    onClick={() => setSelectedClipIndex(idx)}
+                    className="relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 cursor-pointer active:scale-95 transition-transform"
+                  >
+                    <video 
+                      src={clipUrl}
+                      className="w-full aspect-video object-cover pointer-events-none"
+                      muted
+                      playsInline
+                    />
+                    <div className="p-3 flex items-center justify-between">
+                       <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
+                       <div className="p-1.5 bg-gray-800 rounded-md text-blue-400">
+                         <Download className="w-4 h-4" />
+                       </div>
+                    </div>
+                  </div>
+                ))}
              </div>
           </div>
+
+          {/* Fullscreen Modal Viewer */}
+          {selectedClipIndex !== null && (
+            <div className="fixed inset-0 z-50 bg-black flex flex-col">
+              {/* Modal Header */}
+              <div className="p-6 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent absolute top-0 inset-x-0 z-50">
+                <div className="flex flex-col text-white">
+                  <h2 className="text-lg font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
+                  <p className="text-xs text-gray-400">Previewing individual clip</p>
+                </div>
+                <div className="flex items-center gap-4">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      downloadClip(clips[selectedClipIndex!], selectedClipIndex!);
+                    }}
+                    className="p-3 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"
+                  >
+                    <Download className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedClipIndex(null);
+                    }}
+                    className="p-3 bg-gray-800 rounded-full text-white shadow-lg active:scale-90 transition-transform"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Video Player Container */}
+              <div className="flex-1 relative flex items-center justify-center p-4 bg-black">
+                <video 
+                  key={clips[selectedClipIndex]}
+                  src={clips[selectedClipIndex]}
+                  autoPlay
+                  loop
+                  playsInline
+                  controls
+                  className="max-w-full max-h-full rounded-lg shadow-2xl"
+                />
+                
+                {/* Navigation Arrows */}
+                <div className="absolute inset-x-4 flex items-center justify-between pointer-events-none">
+                  <button 
+                    disabled={selectedClipIndex === 0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedClipIndex(selectedClipIndex - 1);
+                    }}
+                    className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === 0 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}
+                  >
+                    <ChevronLeft className="w-8 h-8" />
+                  </button>
+                  <button 
+                    disabled={selectedClipIndex === clips.length - 1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedClipIndex(selectedClipIndex + 1);
+                    }}
+                    className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === clips.length - 1 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}
+                  >
+                    <ChevronRight className="w-8 h-8" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

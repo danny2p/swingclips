@@ -51,12 +51,14 @@ export async function processSwings(
     
     onProgress(`Extracting swing ${i + 1} of ${impacts.length}...`);
     
-    // -c copy is incredibly fast as it avoids re-encoding and just copies the stream
+    // Placing -ss BEFORE -i is faster and often more reliable for the first clip
+    // as it seeks to the nearest keyframe before the timestamp.
     await fm.exec([
-      '-i', inputFileName,
       '-ss', startTime.toString(),
+      '-i', inputFileName,
       '-t', duration.toString(),
       '-c', 'copy',
+      '-map', '0',
       outputFileName
     ]);
     

@@ -11,7 +11,8 @@ export async function detectImpacts(videoBlob: Blob): Promise<number[]> {
   const sampleRate = audioBuffer.sampleRate;
   
   const impacts: number[] = [];
-  const minTimeBetweenImpacts = 4.0; // Assume swings are at least 4 seconds apart
+  const minTimeBetweenImpacts = 4.0; 
+  const startDelay = 0.5; // Ignore impacts for the first 500ms to avoid mic pops
   
   // Use a 20ms window for fine-grained transient detection
   const windowSize = Math.floor(sampleRate * 0.02); 
@@ -30,13 +31,13 @@ export async function detectImpacts(videoBlob: Blob): Promise<number[]> {
   }
   
   // Set threshold to 60% of the maximum recorded volume.
-  // The golf impact should be the loudest "crack" in the session.
   const threshold = maxEnergy * 0.6; 
   
   for (let i = 0; i < energyValues.length; i++) {
-    if (energyValues[i] > threshold) {
-      const timeInSeconds = (i * windowSize) / sampleRate;
-      
+    const timeInSeconds = (i * windowSize) / sampleRate;
+    
+    // Ignore early impacts and ensure we match the threshold
+    if (timeInSeconds > startDelay && energyValues[i] > threshold) {
       // Ensure we don't count the same swing multiple times
       if (impacts.length === 0 || timeInSeconds - impacts[impacts.length - 1] > minTimeBetweenImpacts) {
         impacts.push(timeInSeconds);
