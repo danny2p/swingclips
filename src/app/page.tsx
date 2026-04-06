@@ -37,6 +37,8 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const wasPlayingBeforeScrub = useRef(false);
 
   const togglePlay = () => {
     if (mainVideoRef.current) {
@@ -51,7 +53,7 @@ export default function Home() {
   };
 
   const handleTimeUpdate = () => {
-    if (mainVideoRef.current) {
+    if (mainVideoRef.current && !isScrubbing) {
       setCurrentTime(mainVideoRef.current.currentTime);
     }
   };
@@ -64,9 +66,24 @@ export default function Home() {
 
   const handleScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
+    setCurrentTime(time);
     if (mainVideoRef.current) {
       mainVideoRef.current.currentTime = time;
-      setCurrentTime(time);
+    }
+  };
+
+  const handleScrubStart = () => {
+    if (mainVideoRef.current) {
+      wasPlayingBeforeScrub.current = !mainVideoRef.current.paused;
+      mainVideoRef.current.pause();
+      setIsScrubbing(true);
+    }
+  };
+
+  const handleScrubEnd = () => {
+    setIsScrubbing(false);
+    if (wasPlayingBeforeScrub.current && mainVideoRef.current) {
+      mainVideoRef.current.play();
     }
   };
 
@@ -441,6 +458,10 @@ export default function Home() {
                           step="0.001"
                           value={currentTime}
                           onChange={handleScrub}
+                          onMouseDown={handleScrubStart}
+                          onMouseUp={handleScrubEnd}
+                          onTouchStart={handleScrubStart}
+                          onTouchEnd={handleScrubEnd}
                           className="w-full h-1.5 bg-gray-600 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all focus:outline-none"
                         />
                         {/* Custom Progress Bar background to show "filled" portion */}
