@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
 import JSZip from 'jszip';
@@ -21,6 +21,8 @@ export default function Home() {
   // Gallery
   const [clips, setClips] = useState<string[]>([]);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
+  const [sessionNotes, setSessionNotes] = useState('');
+  const [shotNotes, setShotNotes] = useState<string[]>([]);
 
   // Initialize camera
   const startCamera = useCallback(async () => {
@@ -86,6 +88,7 @@ export default function Home() {
         const generatedClips = await processSwings(fullVideoBlob, impacts, setProgressText);
         
         setClips(generatedClips);
+        setShotNotes(new Array(generatedClips.length).fill(''));
         setAppState('gallery');
       } catch (err) {
         console.error("Processing error:", err);
@@ -113,8 +116,16 @@ export default function Home() {
       clips.forEach(url => URL.revokeObjectURL(url));
       setClips([]);
       setSelectedClipIndex(null);
+      setSessionNotes('');
+      setShotNotes([]);
       setAppState('camera');
     }
+  };
+
+  const updateShotNote = (index: number, text: string) => {
+    const newNotes = [...shotNotes];
+    newNotes[index] = text;
+    setShotNotes(newNotes);
   };
 
   const downloadClip = (url: string, index: number) => {
@@ -154,14 +165,33 @@ export default function Home() {
   };
 
   const downloadAllAsZip = async () => {
+    const originalText = progressText;
     setProgressText("Creating ZIP archive...");
+    setAppState('processing');
+    
     const zip = new JSZip();
     
+    // Add individual clips
     for (let i = 0; i < clips.length; i++) {
       const response = await fetch(clips[i]);
       const blob = await response.blob();
       zip.file(`swing_${i + 1}.webm`, blob);
     }
+
+    // Generate Session Report TXT
+    let reportText = `GOLF SESSION REPORT - ${new Date().toLocaleString()}\n`;
+    reportText += `==========================================\n\n`;
+    reportText += `SESSION NOTES:\n`;
+    reportText += `${sessionNotes || "No session notes recorded."}\n\n`;
+    reportText += `------------------------------------------\n`;
+    reportText += `INDIVIDUAL SWING NOTES:\n\n`;
+    
+    shotNotes.forEach((note, idx) => {
+      reportText += `SWING #${idx + 1}:\n`;
+      reportText += `${note || "No notes for this swing."}\n\n`;
+    });
+
+    zip.file("session_report.txt", reportText);
     
     const content = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(content);
@@ -174,7 +204,8 @@ export default function Home() {
     document.body.removeChild(a);
     
     URL.revokeObjectURL(url);
-    setProgressText(`Found ${clips.length} swings. Processing clips...`); 
+    setProgressText(originalText);
+    setAppState('gallery');
   };
 
   // Render Views
@@ -232,6 +263,7 @@ export default function Home() {
 
       {appState === 'gallery' && (
         <div className="flex-1 flex flex-col bg-gray-950 z-20 overflow-hidden">
+          {/* Gallery Header */}
           <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
              <div>
                <h1 className="text-lg font-bold">Session Gallery</h1>
@@ -255,47 +287,69 @@ export default function Home() {
              </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-4 bg-gray-950">
-             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-w-7xl mx-auto">
-                {clips.map((clipUrl, idx) => (
-                  <div 
-                    key={idx} 
-                    onClick={() => setSelectedClipIndex(idx)}
-                    className="relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 cursor-pointer active:scale-95 transition-transform"
-                  >
-                    <div className="aspect-[3/4] bg-black relative">
-                      <video 
-                        src={clipUrl}
-                        className="w-full h-full object-cover pointer-events-none"
-                        muted
-                        playsInline
-                      />
-                    </div>
-                    <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
-                       <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
-                       <div className="flex gap-2">
-                         <button 
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             shareClip(clipUrl, idx);
-                           }}
-                           className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"
-                         >
-                           <Share2 className="w-4 h-4" />
-                         </button>
-                         <button 
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             downloadClip(clipUrl, idx);
-                           }}
-                           className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"
-                         >
-                           <Download className="w-4 h-4" />
-                         </button>
-                       </div>
-                    </div>
+          <div className="flex-1 overflow-y-auto bg-gray-950">
+             {/* Session Notes Section */}
+             <div className="p-4 max-w-7xl mx-auto w-full">
+               <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6 shadow-lg">
+                  <div className="flex items-center gap-2 mb-2 text-blue-400">
+                    <ClipboardList className="w-5 h-5" />
+                    <h3 className="font-bold text-sm uppercase tracking-wider">Overall Session Notes</h3>
                   </div>
-                ))}
+                  <textarea 
+                    value={sessionNotes}
+                    onChange={(e) => setSessionNotes(e.target.value)}
+                    placeholder="e.g. Club: 7-Iron, Focus: Keeping head still..."
+                    className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[80px]"
+                  />
+               </div>
+
+               {/* Grid Section */}
+               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {clips.map((clipUrl, idx) => (
+                    <div 
+                      key={idx} 
+                      onClick={() => setSelectedClipIndex(idx)}
+                      className="relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 cursor-pointer active:scale-95 transition-transform"
+                    >
+                      <div className="aspect-[3/4] bg-black relative">
+                        <video 
+                          src={clipUrl}
+                          className="w-full h-full object-cover pointer-events-none"
+                          muted
+                          playsInline
+                        />
+                        {shotNotes[idx] && (
+                           <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg">
+                              <FileText className="w-3 h-3 text-white" />
+                           </div>
+                        )}
+                      </div>
+                      <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
+                         <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
+                         <div className="flex gap-2">
+                           <button 
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               shareClip(clipUrl, idx);
+                             }}
+                             className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"
+                           >
+                             <Share2 className="w-4 h-4" />
+                           </button>
+                           <button 
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               downloadClip(clipUrl, idx);
+                             }}
+                             className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"
+                           >
+                             <Download className="w-4 h-4" />
+                           </button>
+                         </div>
+                      </div>
+                    </div>
+                  ))}
+               </div>
              </div>
           </div>
 
@@ -348,7 +402,7 @@ export default function Home() {
                   loop
                   playsInline
                   controls
-                  className="max-w-full max-h-full rounded-lg shadow-2xl"
+                  className="max-w-full max-h-full md:rounded-lg shadow-2xl"
                 />
                 
                 {/* Navigation Arrows */}
@@ -374,6 +428,20 @@ export default function Home() {
                     <ChevronRight className="w-8 h-8" />
                   </button>
                 </div>
+              </div>
+
+              {/* Shot Notes Sidebar/Bottom Panel */}
+              <div className="p-6 bg-gray-950 border-t border-gray-800 animate-in slide-in-from-bottom duration-300">
+                <div className="flex items-center gap-2 mb-3 text-blue-400">
+                   <FileText className="w-5 h-5" />
+                   <h3 className="font-bold text-sm uppercase tracking-wider">Swing Notes</h3>
+                </div>
+                <textarea 
+                  value={shotNotes[selectedClipIndex]}
+                  onChange={(e) => updateShotNote(selectedClipIndex, e.target.value)}
+                  placeholder="Record feedback for this swing..."
+                  className="w-full bg-black border border-gray-800 rounded-xl p-4 text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[100px]"
+                />
               </div>
             </div>
           )}
