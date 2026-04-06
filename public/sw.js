@@ -1,5 +1,5 @@
-const CACHE_NAME = 'swingclips-cache-v3';
-const ASSETS_TO_CACHE = [
+const CACHE_NAME = 'swingclips-cache-v4';
+const PRE_CACHE = [
   '/',
   '/manifest.json',
   '/ffmpeg/ffmpeg-core.js',
@@ -9,35 +9,54 @@ const ASSETS_TO_CACHE = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRE_CACHE))
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  // Immediately take control of the page without waiting for a refresh
   event.waitUntil(self.clients.claim());
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only intercept same-origin requests or specific CDN requests to avoid CORS issues
-  // But ensure COOP/COEP are applied to make SharedArrayBuffer work
+  const url = new URL(event.request.url);
+  
+  // Strategy: Network-First, but auto-cache EVERYTHING from our own origin
+  // This captures all the Next.js JS/CSS chunks automatically
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        if (response.status === 0) return response; // Handled by browser
+        if (!response || response.status !== 200 || response.type !== 'basic') {
+          // If it's a cross-origin or error, just return it (with headers if basic)
+          return injectHeaders(response);
+        }
 
-        const newHeaders = new Headers(response.headers);
-        newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
-        newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
-        newHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin'); // Critical for allowing resources
-
-        return new Response(response.body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: newHeaders,
+        // Clone and save to cache for next time
+        const responseToCache = response.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(event.request, responseToCache);
         });
+
+        return injectHeaders(response);
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => {
+        // Offline: Return from cache
+        return caches.match(event.request);
+      })
   );
 });
+
+function injectHeaders(response) {
+  if (!response || response.status === 0) return response;
+
+  const newHeaders = new Headers(response.headers);
+  newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
+  newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
+  newHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin');
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: newHeaders,
+  });
+}
