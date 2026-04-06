@@ -488,7 +488,7 @@ export default function Home() {
                       playsInline 
                       className="w-full h-full object-cover" 
                       style={{ 
-                        transform: `scale(8) translate(${(50 - ballPosition.x) / 8}%, ${(50 - ballPosition.y) / 8}%)`,
+                        transform: `translate(${50 - ballPosition.x}%, ${50 - ballPosition.y}%) scale(8)`,
                         imageRendering: 'pixelated' 
                       }} 
                      />
