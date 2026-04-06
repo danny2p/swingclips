@@ -177,12 +177,24 @@ export default function Home() {
 
   const toggleCamera = () => { if (!isRecording) setFacingMode(prev => prev === 'user' ? 'environment' : 'user'); };
 
-  const handleCameraTap = (e: React.MouseEvent<HTMLDivElement>) => {
+  const updateBallPosition = (clientX: number, clientY: number, target: HTMLDivElement) => {
     if (isRecording) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    const rect = target.getBoundingClientRect();
+    const x = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
     setBallPosition({ x, y });
+  };
+
+  const handleCameraInteraction = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    if (isRecording) return;
+    
+    // For MouseEvents, only update if button is down (dragging) or it's a click
+    if ('buttons' in e && e.type === 'mousemove' && e.buttons !== 1) return;
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    updateBallPosition(clientX, clientY, e.currentTarget);
   };
 
   const startRecording = useCallback(() => {
@@ -300,7 +312,13 @@ export default function Home() {
     <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden select-none">
       
       {appState === 'camera' && (
-        <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden" onClick={handleCameraTap}>
+        <div 
+          className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden touch-none" 
+          onMouseDown={handleCameraInteraction}
+          onMouseMove={handleCameraInteraction}
+          onTouchMove={handleCameraInteraction}
+          onTouchStart={handleCameraInteraction}
+        >
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover absolute inset-0 z-0" />
           {!isRecording && (
             <div className="absolute z-10 flex flex-col items-center pointer-events-none transition-all duration-300" style={{ left: `${ballPosition.x}%`, top: `${ballPosition.y}%`, transform: 'translate(-50%, -50%)' }}>
@@ -385,7 +403,7 @@ export default function Home() {
                   onLoadedMetadata={handleLoadedMetadata}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
-                  className="max-w-full max-h-full md:rounded-lg shadow-2xl" 
+                  className="w-full h-full object-cover absolute inset-0 z-0" 
                 />
                 
                 {/* Telestrator Canvas */}
