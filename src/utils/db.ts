@@ -11,6 +11,7 @@ export interface SwingClip {
 export interface Session {
   id: number; // Timestamp
   date: Date;
+  sessionName?: string;
   sessionNotes: string;
   clips: SwingClip[];
 }

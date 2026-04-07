@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, RefreshCw, Eraser, Play, Pause, Gauge, History, Trash2 } from 'lucide-react';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, RefreshCw, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, MoveRight, SkipBack, SkipForward } from 'lucide-react';
 import { detectImpacts } from '@/utils/audioProcessor';
 import { processSwings } from '@/utils/videoProcessor';
 import { Session, getAllSessions, saveSession, deleteSession } from '@/utils/db';
@@ -28,15 +28,17 @@ export default function Home() {
   // Gallery
   const [clips, setClips] = useState<string[]>([]);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
+  const [sessionName, setSessionName] = useState('');
   const [sessionNotes, setSessionNotes] = useState('');
   const [shotNotes, setShotNotes] = useState<string[]>([]);
   const [showNotes, setShowNotes] = useState(false);
 
-  // Line Tool State
+  // Drawing Tool State
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [lines, setLines] = useState<{start: {x: number, y: number}, end: {x: number, y: number}}[]>([]);
-  const [currentLine, setCurrentLine] = useState<{start: {x: number, y: number}, end: {x: number, y: number}} | null>(null);
-  const [draggedHandle, setDraggedHandle] = useState<{lineIndex: number, handle: 'start' | 'end'} | null>(null);
+  const [drawMode, setDrawMode] = useState<'line' | 'circle'>('line');
+  const [shapes, setShapes] = useState<{type: 'line' | 'circle', start: {x: number, y: number}, end: {x: number, y: number}}[]>([]);
+  const [currentShape, setCurrentShape] = useState<{type: 'line' | 'circle', start: {x: number, y: number}, end: {x: number, y: number}} | null>(null);
+  const [draggedHandle, setDraggedHandle] = useState<{shapeIndex: number, handle: 'start' | 'end'} | null>(null);
   const [drawColor] = useState('#22c55e'); // Green
 
   // Redraw canvas whenever lines change
@@ -51,10 +53,15 @@ export default function Home() {
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
 
-    const drawLine = (l: {start: {x: number, y: number}, end: {x: number, y: number}}, isCurrent = false) => {
+    const drawShape = (s: {type: 'line' | 'circle', start: {x: number, y: number}, end: {x: number, y: number}}, isCurrent = false) => {
       ctx.beginPath();
-      ctx.moveTo(l.start.x, l.start.y);
-      ctx.lineTo(l.end.x, l.end.y);
+      if (s.type === 'line') {
+        ctx.moveTo(s.start.x, s.start.y);
+        ctx.lineTo(s.end.x, s.end.y);
+      } else {
+        const radius = Math.sqrt((s.end.x - s.start.x) ** 2 + (s.end.y - s.start.y) ** 2);
+        ctx.arc(s.start.x, s.start.y, radius, 0, Math.PI * 2);
+      }
       ctx.strokeStyle = drawColor;
       ctx.lineWidth = 3;
       ctx.stroke();
@@ -63,22 +70,22 @@ export default function Home() {
       const drawHandle = (p: {x: number, y: number}) => {
         ctx.beginPath();
         ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = isCurrent ? '#3b82f6' : 'white'; // Blue if creating, White if existing
+        ctx.fillStyle = isCurrent ? '#3b82f6' : 'white'; 
         ctx.fill();
         ctx.strokeStyle = drawColor;
         ctx.lineWidth = 2;
         ctx.stroke();
       };
 
-      drawHandle(l.start);
-      drawHandle(l.end);
+      drawHandle(s.start);
+      drawHandle(s.end);
     };
 
-    lines.forEach((l) => drawLine(l));
-    if (currentLine) drawLine(currentLine, true);
-  }, [lines, currentLine, drawColor]);
+    shapes.forEach((s) => drawShape(s));
+    if (currentShape) drawShape(currentShape, true);
+  }, [shapes, currentShape, drawColor]);
 
-  // Handle Line Drawing Logic
+  // Handle Drawing Logic
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -87,23 +94,23 @@ export default function Home() {
     const y = ('touches' in e) ? e.touches[0].clientY - rect.top : (e as React.MouseEvent).clientY - rect.top;
 
     // Check if we're grabbing an existing handle
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const distStart = Math.sqrt((x - line.start.x) ** 2 + (y - line.start.y) ** 2);
-      const distEnd = Math.sqrt((x - line.end.x) ** 2 + (y - line.end.y) ** 2);
+    for (let i = 0; i < shapes.length; i++) {
+      const s = shapes[i];
+      const distStart = Math.sqrt((x - s.start.x) ** 2 + (y - s.start.y) ** 2);
+      const distEnd = Math.sqrt((x - s.end.x) ** 2 + (y - s.end.y) ** 2);
 
       if (distStart < 15) {
-        setDraggedHandle({ lineIndex: i, handle: 'start' });
+        setDraggedHandle({ shapeIndex: i, handle: 'start' });
         return;
       }
       if (distEnd < 15) {
-        setDraggedHandle({ lineIndex: i, handle: 'end' });
+        setDraggedHandle({ shapeIndex: i, handle: 'end' });
         return;
       }
     }
 
-    // Otherwise, start a new line
-    setCurrentLine({ start: { x, y }, end: { x, y } });
+    // Otherwise, start a new shape
+    setCurrentShape({ type: drawMode, start: { x, y }, end: { x, y } });
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
@@ -114,30 +121,30 @@ export default function Home() {
     const y = ('touches' in e) ? e.touches[0].clientY - rect.top : (e as React.MouseEvent).clientY - rect.top;
 
     if (draggedHandle) {
-      const newLines = [...lines];
-      const line = newLines[draggedHandle.lineIndex];
+      const newShapes = [...shapes];
+      const s = newShapes[draggedHandle.shapeIndex];
       if (draggedHandle.handle === 'start') {
-        line.start = { x, y };
+        s.start = { x, y };
       } else {
-        line.end = { x, y };
+        s.end = { x, y };
       }
-      setLines(newLines);
-    } else if (currentLine) {
-      setCurrentLine({ ...currentLine, end: { x, y } });
+      setShapes(newShapes);
+    } else if (currentShape) {
+      setCurrentShape({ ...currentShape, end: { x, y } });
     }
   };
 
   const stopDrawing = () => {
-    if (currentLine) {
-      setLines([...lines, currentLine]);
-      setCurrentLine(null);
+    if (currentShape) {
+      setShapes([...shapes, currentShape]);
+      setCurrentShape(null);
     }
     setDraggedHandle(null);
   };
 
   const clearCanvas = () => {
-    setLines([]);
-    setCurrentLine(null);
+    setShapes([]);
+    setCurrentShape(null);
   };
 
   // Player state
@@ -166,6 +173,16 @@ export default function Home() {
     setPlaybackRate(newRate);
     if (mainVideoRef.current) {
       mainVideoRef.current.playbackRate = newRate;
+    }
+  };
+
+  const stepFrame = (delta: number) => {
+    if (mainVideoRef.current) {
+      mainVideoRef.current.pause();
+      setIsPlaying(false);
+      const newTime = Math.max(0, Math.min(duration, mainVideoRef.current.currentTime + delta));
+      mainVideoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
     }
   };
 
@@ -234,6 +251,7 @@ export default function Home() {
       const newSession: Session = {
         id: sessionId,
         date: new Date(),
+        sessionName: '',
         sessionNotes: '',
         clips: clipBlobs
       };
@@ -256,6 +274,7 @@ export default function Home() {
 
       const updatedSession: Session = {
         ...currentSession,
+        sessionName,
         sessionNotes,
         clips: currentSession.clips.map((clip, idx) => ({
           ...clip,
@@ -266,7 +285,7 @@ export default function Home() {
     } catch (err) {
       console.error("Error updating notes in DB:", err);
     }
-  }, [currentSessionId, sessionNotes, shotNotes]);
+  }, [currentSessionId, sessionName, sessionNotes, shotNotes]);
 
   // Debounce note syncing
   useEffect(() => {
@@ -274,7 +293,7 @@ export default function Home() {
       if (appState === 'gallery') updateNotesInDB();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [sessionNotes, shotNotes, updateNotesInDB, appState]);
+  }, [sessionName, sessionNotes, shotNotes, updateNotesInDB, appState]);
 
   const loadSession = (session: Session) => {
     // Clear old URLs
@@ -285,6 +304,7 @@ export default function Home() {
     
     setClips(newUrls);
     setShotNotes(newShotNotes);
+    setSessionName(session.sessionName || '');
     setSessionNotes(session.sessionNotes);
     setCurrentSessionId(session.id);
     setAppState('gallery');
@@ -491,8 +511,8 @@ export default function Home() {
                 <div key={session.id} onClick={() => loadSession(session)} className="bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg cursor-pointer hover:border-blue-500/50 transition-all active:scale-[0.98]">
                   <div className="flex justify-between items-start mb-3">
                     <div>
-                      <h3 className="font-bold text-white">{new Date(session.id).toLocaleDateString()}</h3>
-                      <p className="text-xs text-gray-500">{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
+                      <h3 className="font-bold text-white">{session.sessionName || new Date(session.id).toLocaleDateString()}</h3>
+                      <p className="text-xs text-gray-500">{session.sessionName ? new Date(session.id).toLocaleDateString() + ' • ' : ''}{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
                     </div>
                     <button onClick={(e) => deleteHistorySession(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                   </div>
@@ -536,9 +556,15 @@ export default function Home() {
           </div>
           <div className="flex-1 overflow-y-auto bg-gray-950">
              <div className="p-4 max-w-7xl mx-auto w-full">
-               <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6 shadow-lg">
-                  <div className="flex items-center gap-2 mb-2 text-blue-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Overall Session Notes</h3></div>
-                  <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Club: 7-Iron, Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[80px]" />
+               <div className="flex flex-col md:flex-row gap-4 mb-6">
+                 <div className="flex-1 bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg">
+                    <div className="flex items-center gap-2 mb-2 text-blue-400"><FileText className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Session Name</h3></div>
+                    <input type="text" value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="e.g. 7-Iron Drills..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" />
+                 </div>
+                 <div className="flex-1 bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg">
+                    <div className="flex items-center gap-2 mb-2 text-blue-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Overall Session Notes</h3></div>
+                    <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[45px]" />
+                 </div>
                </div>
                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                   {clips.map((clipUrl, idx) => (
@@ -590,12 +616,30 @@ export default function Home() {
                   <div className="max-w-3xl mx-auto w-full flex flex-col gap-2 pointer-events-auto">
                     {/* Scrubber */}
                     <div className="w-full flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 shadow-2xl">
-                      <button 
-                        onClick={togglePlay} 
-                        className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
-                      >
-                        {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => stepFrame(-1/60)} 
+                          className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors"
+                          title="Previous Frame"
+                        >
+                          <SkipBack className="w-4 h-4" />
+                        </button>
+                        
+                        <button 
+                          onClick={togglePlay} 
+                          className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
+                        >
+                          {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
+                        </button>
+
+                        <button 
+                          onClick={() => stepFrame(1/60)} 
+                          className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors"
+                          title="Next Frame"
+                        >
+                          <SkipForward className="w-4 h-4" />
+                        </button>
+                      </div>
                       
                       <div className="flex-1 flex items-center group relative h-6">
                         <input 
@@ -644,6 +688,10 @@ export default function Home() {
                 <div className="flex flex-col text-white pointer-events-auto">
                   <h2 className="text-lg font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
                   <div className="flex gap-2 mt-1">
+                    <button onClick={() => setDrawMode(drawMode === 'line' ? 'circle' : 'line')} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${drawMode === 'circle' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                      {drawMode === 'line' ? <MoveRight className="w-3 h-3" /> : <CircleIcon className="w-3 h-3" />} 
+                      Mode: {drawMode}
+                    </button>
                     <button onClick={clearCanvas} className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-800 text-gray-400 hover:text-white transition-colors"><Eraser className="w-3 h-3" /> Clear Lines</button>
                     <button onClick={() => setShowNotes(!showNotes)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${showNotes ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}><FileText className="w-3 h-3" /> Notes {showNotes ? 'ON' : 'OFF'}</button>
                   </div>
