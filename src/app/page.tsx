@@ -115,6 +115,7 @@ export default function Home() {
 
   // Gallery
   const [clips, setClips] = useState<(string | null)[]>([]);
+  const [posters, setPosters] = useState<(string | null)[]>([]);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
   const [sessionName, setSessionName] = useState('');
   const [sessionNotes, setSessionNotes] = useState('');
@@ -542,7 +543,7 @@ export default function Home() {
     }
   };
 
-  const persistSession = async (clipUrls: string[], notes: string[], favs: boolean[], providedBlobs?: Blob[]) => {
+  const persistSession = async (clipUrls: string[], notes: string[], favs: boolean[], providedBlobs?: Blob[], posterBlobs?: (Blob | undefined)[]) => {
     try {
       const clipBlobs = await Promise.all(clipUrls.map(async (url, idx) => {
         let blob = providedBlobs ? providedBlobs[idx] : null;
@@ -550,7 +551,15 @@ export default function Home() {
           const res = await fetch(url);
           blob = await res.blob();
         }
-        return { blob, shotNote: notes[idx] || '', isFavorite: favs[idx] || false };
+        
+        let pBlob = posterBlobs ? posterBlobs[idx] : undefined;
+        
+        return { 
+          blob, 
+          posterBlob: pBlob,
+          shotNote: notes[idx] || '', 
+          isFavorite: favs[idx] || false 
+        };
       }));
 
       const sessionId = Date.now();
@@ -605,12 +614,15 @@ export default function Home() {
   const loadSession = (session: Session) => {
     // Clear old URLs
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
+    posters.forEach(url => { if (url) URL.revokeObjectURL(url); });
     
     const newUrls = session.clips.map(c => URL.createObjectURL(c.blob));
+    const newPosterUrls = session.clips.map(c => c.posterBlob ? URL.createObjectURL(c.posterBlob) : null);
     const newShotNotes = session.clips.map(c => c.shotNote);
     const newFavorites = session.clips.map(c => c.isFavorite || false);
     
     setClips(newUrls);
+    setPosters(newPosterUrls);
     setShotNotes(newShotNotes);
     setFavorites(newFavorites);
     setSessionName(session.sessionName || '');
@@ -883,6 +895,7 @@ export default function Home() {
 
         // Instant UI transition with placeholders
         setClips(new Array(impacts.length).fill(null));
+        setPosters(new Array(impacts.length).fill(null));
         const initialNotes = new Array(impacts.length).fill('');
         const initialFavorites = new Array(impacts.length).fill(false);
         setShotNotes(initialNotes);
@@ -893,16 +906,29 @@ export default function Home() {
           fullVideoBlob, 
           impacts, 
           setProgressText,
-          (index, clipUrl) => {
+          (index, clipUrl, clipBlob, posterUrl) => {
             setClips(prev => {
               const next = [...prev];
               next[index] = clipUrl;
               return next;
             });
+            if (posterUrl) {
+              setPosters(prev => {
+                const next = [...prev];
+                next[index] = posterUrl;
+                return next;
+              });
+            }
           }
         );
         
-        await persistSession(clipResults.map(c => c.url), initialNotes, initialFavorites, clipResults.map(c => c.blob));
+        await persistSession(
+          clipResults.map(c => c.url), 
+          initialNotes, 
+          initialFavorites, 
+          clipResults.map(c => c.blob),
+          clipResults.map(c => c.posterBlob)
+        );
       } catch (err) {
         console.error("Processing error:", err);
         alert("Error processing video.");
@@ -931,7 +957,9 @@ export default function Home() {
 
   const resetApp = () => {
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
+    posters.forEach(url => { if (url) URL.revokeObjectURL(url); });
     setClips([]);
+    setPosters([]);
     setSelectedClipIndex(null);
     setSessionNotes('');
     setShotNotes([]);
@@ -1007,6 +1035,10 @@ export default function Home() {
     const urlToRemove = newClips[index];
     newClips.splice(index, 1);
     
+    const newPosters = [...posters];
+    const posterToRemove = newPosters[index];
+    newPosters.splice(index, 1);
+    
     const newNotes = [...shotNotes];
     newNotes.splice(index, 1);
     
@@ -1014,10 +1046,12 @@ export default function Home() {
     newFavs.splice(index, 1);
     
     setClips(newClips);
+    setPosters(newPosters);
     setShotNotes(newNotes);
     setFavorites(newFavs);
     
     if (urlToRemove) URL.revokeObjectURL(urlToRemove);
+    if (posterToRemove) URL.revokeObjectURL(posterToRemove);
 
     if (currentSessionId !== null) {
       try {
@@ -1214,7 +1248,12 @@ export default function Home() {
                   <div className="flex gap-2 mt-3 overflow-hidden h-12">
                     {session.clips.slice(0, 5).map((clip, idx) => (
                       <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
-                        <video src={`${URL.createObjectURL(clip.blob)}#t=0.001`} className="w-full h-full object-cover" preload="metadata" />
+                        <video 
+                          src={URL.createObjectURL(clip.blob)} 
+                          poster={clip.posterBlob ? URL.createObjectURL(clip.posterBlob) : undefined}
+                          className="w-full h-full object-cover" 
+                          preload="metadata" 
+                        />
                       </div>
                     ))}
                     {session.clips.length > 5 && (
@@ -1264,7 +1303,14 @@ export default function Home() {
                      <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
                        {clipUrl ? (
                          <>
-                           <video src={`${clipUrl}#t=0.001`} className="w-full h-full object-cover pointer-events-none" muted playsInline preload="metadata" />
+                           <video 
+                             src={clipUrl} 
+                             poster={posters[idx] || undefined}
+                             className="w-full h-full object-cover pointer-events-none" 
+                             muted 
+                             playsInline 
+                             preload="metadata" 
+                           />
                            {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
                            <button 
                              onClick={(e) => toggleFavorite(idx, e)}
@@ -1309,6 +1355,7 @@ export default function Home() {
                   ref={mainVideoRef} 
                   key={clips[selectedClipIndex] as string} 
                   src={clips[selectedClipIndex] as string} 
+                  poster={posters[selectedClipIndex] || undefined}
                   autoPlay 
                   loop 
                   playsInline 

@@ -5,6 +5,7 @@
 
 export interface SwingClip {
   blob: Blob;
+  posterBlob?: Blob;
   shotNote: string;
   isFavorite?: boolean;
 }
