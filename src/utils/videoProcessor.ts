@@ -51,8 +51,8 @@ export async function processSwings(
   videoBlob: Blob, 
   impacts: number[], 
   onProgress: (progress: string) => void,
-  onClipReady?: (index: number, clipUrl: string, clipBlob: Blob, posterUrl?: string, posterBlob?: Blob) => void
-): Promise<{url: string, blob: Blob, posterUrl?: string, posterBlob?: Blob}[]> {
+  onClipReady?: (index: number, clipUrl: string, clipBlob: Blob) => void
+): Promise<{url: string, blob: Blob}[]> {
   const fm = await initFFmpeg(onProgress);
   
   const isIOS = typeof navigator !== 'undefined' && (
@@ -86,7 +86,7 @@ export async function processSwings(
     }
   }
 
-  const clipResults: {url: string, blob: Blob, posterUrl?: string, posterBlob?: Blob}[] = [];
+  const clipResults: {url: string, blob: Blob}[] = [];
   
   for (let i = 0; i < impacts.length; i++) {
     const impactTime = impacts[i];
@@ -115,8 +115,6 @@ export async function processSwings(
       const clipBlob = new Blob([safeData], { type: 'video/mp4' });
       const url = URL.createObjectURL(clipBlob);
       
-      // Note: posterUrl and posterBlob are null here, 
-      // we will generate them via Canvas in the UI.
       clipResults.push({url, blob: clipBlob});
       if (onClipReady) onClipReady(i, url, clipBlob);
       

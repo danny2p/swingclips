@@ -4,8 +4,7 @@
  */
 
 export interface SwingClip {
-  blob: Blob;
-  posterBlob?: Blob;
+  data: Uint8Array; // Using Uint8Array instead of Blob for better Safari/IndexedDB stability
   shotNote: string;
   isFavorite?: boolean;
 }

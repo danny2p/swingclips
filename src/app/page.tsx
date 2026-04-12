@@ -6,45 +6,6 @@ import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
 import { Session, getAllSessions, saveSession, deleteSession } from '@/utils/db';
 import JSZip from 'jszip';
 
-const generatePoster = (videoBlob: Blob): Promise<{url: string, blob: Blob}> => {
-  return new Promise((resolve) => {
-    const video = document.createElement('video');
-    video.preload = 'metadata';
-    video.muted = true;
-    video.playsInline = true;
-    const url = URL.createObjectURL(videoBlob);
-    video.src = url;
-    
-    video.onloadedmetadata = () => {
-      // Seek to 1s or half duration to get a good frame
-      video.currentTime = Math.min(1, video.duration / 2);
-    };
-
-    video.onseeked = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const posterUrl = URL.createObjectURL(blob);
-            resolve({ url: posterUrl, blob });
-          }
-          URL.revokeObjectURL(url);
-        }, 'image/jpeg', 0.8);
-      } else {
-        URL.revokeObjectURL(url);
-      }
-    };
-
-    video.onerror = () => {
-      URL.revokeObjectURL(url);
-    };
-  });
-};
-
 export default function Home() {
   // App states: 'camera' | 'processing' | 'gallery' | 'history'
   const [appState, setAppState] = useState<'camera' | 'processing' | 'gallery' | 'history'>('camera');
@@ -202,7 +163,6 @@ export default function Home() {
 
   // Gallery
   const [clips, setClips] = useState<(string | null)[]>([]);
-  const [posters, setPosters] = useState<(string | null)[]>([]);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
   const [sessionName, setSessionName] = useState('');
   const [sessionNotes, setSessionNotes] = useState('');
@@ -630,17 +590,19 @@ export default function Home() {
     }
   };
 
-  const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob, posterBlob?: Blob) => {
+  const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob) => {
     try {
       const allSessions = await getAllSessions();
       const currentSession = allSessions.find(s => s.id === sessionId);
       if (!currentSession) return;
 
+      const arrayBuffer = await videoBlob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
       const updatedClips = [...currentSession.clips];
       updatedClips[index] = {
         ...updatedClips[index],
-        blob: videoBlob,
-        posterBlob: posterBlob,
+        data: uint8Array,
       };
 
       const updatedSession: Session = {
@@ -689,15 +651,12 @@ export default function Home() {
   const loadSession = (session: Session) => {
     // Clear old URLs
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
-    posters.forEach(url => { if (url) URL.revokeObjectURL(url); });
     
-    const newUrls = session.clips.map(c => URL.createObjectURL(c.blob));
-    const newPosterUrls = session.clips.map(c => c.posterBlob ? URL.createObjectURL(c.posterBlob) : null);
+    const newUrls = session.clips.map(c => URL.createObjectURL(new Blob([c.data], { type: 'video/mp4' })));
     const newShotNotes = session.clips.map(c => c.shotNote);
     const newFavorites = session.clips.map(c => c.isFavorite || false);
     
     setClips(newUrls);
-    setPosters(newPosterUrls);
     setShotNotes(newShotNotes);
     setFavorites(newFavorites);
     setSessionName(session.sessionName || '');
@@ -973,7 +932,6 @@ export default function Home() {
 
         // Instant UI transition with placeholders
         setClips(new Array(impacts.length).fill(null));
-        setPosters(new Array(impacts.length).fill(null));
         const initialNotes = new Array(impacts.length).fill('');
         const initialFavorites = new Array(impacts.length).fill(false);
         setShotNotes(initialNotes);
@@ -985,7 +943,7 @@ export default function Home() {
         const sessionId = Date.now();
         setCurrentSessionId(sessionId);
         const placeholderClips = initialNotes.map(() => ({
-          blob: new Blob([], { type: 'video/mp4' }), // Temporary empty blob
+          data: new Uint8Array(0), // Temporary empty data
           shotNote: '',
           isFavorite: false
         }));
@@ -1005,31 +963,15 @@ export default function Home() {
           fullVideoBlob, 
           impacts, 
           setProgressText,
-          async (index, clipUrl, clipBlob, posterUrl, posterBlob) => {
+          async (index, clipUrl, clipBlob) => {
             setClips(prev => {
               const next = [...prev];
               next[index] = clipUrl;
               return next;
             });
             
-            let finalPosterUrl = posterUrl;
-            let finalPosterBlob = posterBlob;
-
-            if (!finalPosterUrl) {
-              const poster = await generatePoster(clipBlob);
-              finalPosterUrl = poster.url;
-              finalPosterBlob = poster.blob;
-            }
-
-            if (finalPosterUrl) {
-              setPosters(prev => {
-                const next = [...prev];
-                next[index] = finalPosterUrl;
-                return next;
-              });
-            }
             // Save each clip to DB as soon as it's ready
-            await persistIncrementalClip(sessionId, index, clipBlob, finalPosterBlob);
+            await persistIncrementalClip(sessionId, index, clipBlob);
           }
         );
 
@@ -1073,9 +1015,7 @@ export default function Home() {
 
   const resetApp = () => {
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
-    posters.forEach(url => { if (url) URL.revokeObjectURL(url); });
     setClips([]);
-    setPosters([]);
     setSelectedClipIndex(null);
     setSessionNotes('');
     setShotNotes([]);
@@ -1151,10 +1091,6 @@ export default function Home() {
     const urlToRemove = newClips[index];
     newClips.splice(index, 1);
     
-    const newPosters = [...posters];
-    const posterToRemove = newPosters[index];
-    newPosters.splice(index, 1);
-    
     const newNotes = [...shotNotes];
     newNotes.splice(index, 1);
     
@@ -1162,7 +1098,6 @@ export default function Home() {
     newFavs.splice(index, 1);
     
     setClips(newClips);
-    setPosters(newPosters);
     setShotNotes(newNotes);
     setFavorites(newFavs);
 
@@ -1180,7 +1115,6 @@ export default function Home() {
     }
     
     if (urlToRemove) URL.revokeObjectURL(urlToRemove);
-    if (posterToRemove) URL.revokeObjectURL(posterToRemove);
 
     if (currentSessionId !== null) {
       try {
@@ -1378,8 +1312,7 @@ export default function Home() {
                     {session.clips.slice(0, 5).map((clip, idx) => (
                       <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
                         <video 
-                          src={URL.createObjectURL(clip.blob)} 
-                          poster={clip.posterBlob ? URL.createObjectURL(clip.posterBlob) : undefined}
+                          src={`${URL.createObjectURL(new Blob([clip.data], { type: 'video/mp4' }))}#t=2`} 
                           className="w-full h-full object-cover" 
                           preload="metadata" 
                         />
@@ -1433,8 +1366,7 @@ export default function Home() {
                        {clipUrl ? (
                          <>
                            <video 
-                             src={clipUrl} 
-                             poster={posters[idx] || undefined}
+                             src={`${clipUrl}#t=2`}
                              className="w-full h-full object-cover pointer-events-none" 
                              muted 
                              playsInline 
@@ -1484,7 +1416,6 @@ export default function Home() {
                   ref={mainVideoRef} 
                   key={clips[selectedClipIndex] as string} 
                   src={clips[selectedClipIndex] as string} 
-                  poster={posters[selectedClipIndex] || undefined}
                   autoPlay 
                   loop 
                   playsInline 
