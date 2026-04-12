@@ -53,8 +53,8 @@ export async function processSwings(
   videoBlob: Blob, 
   impacts: number[], 
   onProgress: (progress: string) => void,
-  onClipReady?: (index: number, clipUrl: string, clipBlob: Blob) => void
-): Promise<{url: string, blob: Blob}[]> {
+  onClipReady?: (index: number, clipUrl: string, clipBlob: Blob, posterUrl?: string, posterBlob?: Blob) => void
+): Promise<{url: string, blob: Blob, posterUrl?: string, posterBlob?: Blob}[]> {
   const fm = await initFFmpeg(onProgress);
   
   // Refined iOS detection: checking User Agent is more reliable than just blob type.
@@ -93,20 +93,26 @@ export async function processSwings(
     }
   }
 
-  const clipResults: {url: string, blob: Blob}[] = [];
+  const clipResults: {url: string, blob: Blob, posterUrl?: string, posterBlob?: Blob}[] = [];
   
   for (let i = 0; i < impacts.length; i++) {
     const impactTime = impacts[i];
     const startTime = Math.max(0, impactTime - 2); 
     const duration = 4; 
     const outputFileName = `swing_${i}.mp4`;
+    const posterFileName = `poster_${i}.jpg`;
+    
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     try {
-      // Now we can use fast Input Seeking for EVERYONE because we fixed the iOS file above.
+      // 1. Combined Pass: Open file ONCE, split stream in memory for two outputs
+      // This is the most memory-efficient way to get a video and a thumbnail.
       await fm.exec([
         '-ss', startTime.toString(), 
         '-i', activeInputFile, 
-        '-t', duration.toString(), 
+        '-t', duration.toString(),
+        '-filter_complex', '[0:v]split=2[v1][v2]',
+        '-map', '[v1]',
+        '-map', '0:a?', 
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-crf', '28',
@@ -115,15 +121,28 @@ export async function processSwings(
         '-movflags', '+faststart',
         '-c:a', 'aac',
         '-b:a', '128k',
-        outputFileName
+        outputFileName,
+        '-map', '[v2]',
+        '-vframes', '1',
+        '-f', 'image2',
+        posterFileName
       ]);
+
       const data = await fm.readFile(outputFileName);
       const safeData = new Uint8Array(data as any);
       const clipBlob = new Blob([safeData], { type: 'video/mp4' });
       const url = URL.createObjectURL(clipBlob);
-      clipResults.push({url, blob: clipBlob});
-      if (onClipReady) onClipReady(i, url, clipBlob);
+
+      const posterData = await fm.readFile(posterFileName);
+      const safePosterData = new Uint8Array(posterData as any);
+      const posterBlob = new Blob([safePosterData], { type: 'image/jpeg' });
+      const posterUrl = URL.createObjectURL(posterBlob);
+
+      clipResults.push({url, blob: clipBlob, posterUrl, posterBlob});
+      if (onClipReady) onClipReady(i, url, clipBlob, posterUrl, posterBlob);
+      
       await fm.deleteFile(outputFileName);
+      await fm.deleteFile(posterFileName);
     } catch (err) {
       onProgress(`Error on swing ${i + 1}...`);
     }

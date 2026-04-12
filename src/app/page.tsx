@@ -46,12 +46,15 @@ export default function Home() {
   const recordingStartTimeRef = useRef(0);
   const impactTimesRef = useRef<number[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const [liveVolume, setLiveVolume] = useState(0);
   const [isPreflightTriggered, setIsPreflightTriggered] = useState(false);
-
   const audioLoopRef = useRef<number | null>(null);
   const meterRef = useRef<HTMLDivElement>(null);
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
+
+  // Audio state refs for real-time detection
+  const lastTriggerTimeRef = useRef(0);
+  const energyHistoryRef = useRef([0, 0]);
+
 
   const playTickSound = () => {
     try {
@@ -115,6 +118,7 @@ export default function Home() {
 
   // Gallery
   const [clips, setClips] = useState<(string | null)[]>([]);
+  const [posters, setPosters] = useState<(string | null)[]>([]);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
   const [sessionName, setSessionName] = useState('');
   const [sessionNotes, setSessionNotes] = useState('');
@@ -542,31 +546,27 @@ export default function Home() {
     }
   };
 
-  const persistSession = async (clipUrls: string[], notes: string[], favs: boolean[], providedBlobs?: Blob[]) => {
+  const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob, posterBlob?: Blob) => {
     try {
-      const clipBlobs = await Promise.all(clipUrls.map(async (url, idx) => {
-        let blob = providedBlobs ? providedBlobs[idx] : null;
-        if (!blob) {
-          const res = await fetch(url);
-          blob = await res.blob();
-        }
-        return { blob, shotNote: notes[idx] || '', isFavorite: favs[idx] || false };
-      }));
+      const allSessions = await getAllSessions();
+      const currentSession = allSessions.find(s => s.id === sessionId);
+      if (!currentSession) return;
 
-      const sessionId = Date.now();
-      const newSession: Session = {
-        id: sessionId,
-        date: new Date(),
-        sessionName: '',
-        sessionNotes: '',
-        clips: clipBlobs
+      const updatedClips = [...currentSession.clips];
+      updatedClips[index] = {
+        ...updatedClips[index],
+        blob: videoBlob,
+        posterBlob: posterBlob,
       };
 
-      await saveSession(newSession);
-      setCurrentSessionId(sessionId);
-      await loadHistory();
+      const updatedSession: Session = {
+        ...currentSession,
+        clips: updatedClips
+      };
+      await saveSession(updatedSession);
+      await loadHistory(); // Refresh history list
     } catch (err) {
-      console.error("Error persisting session:", err);
+      console.error("Error persisting incremental clip:", err);
     }
   };
 
@@ -605,12 +605,15 @@ export default function Home() {
   const loadSession = (session: Session) => {
     // Clear old URLs
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
+    posters.forEach(url => { if (url) URL.revokeObjectURL(url); });
     
     const newUrls = session.clips.map(c => URL.createObjectURL(c.blob));
+    const newPosterUrls = session.clips.map(c => c.posterBlob ? URL.createObjectURL(c.posterBlob) : null);
     const newShotNotes = session.clips.map(c => c.shotNote);
     const newFavorites = session.clips.map(c => c.isFavorite || false);
     
     setClips(newUrls);
+    setPosters(newPosterUrls);
     setShotNotes(newShotNotes);
     setFavorites(newFavorites);
     setSessionName(session.sessionName || '');
@@ -742,7 +745,6 @@ export default function Home() {
     source.connect(analyser);
 
     const dataArray = new Float32Array(analyser.fftSize);
-    let lastTriggerTime = 0;
 
     // Filter state
     let prevRaw = 0;
@@ -750,9 +752,6 @@ export default function Home() {
     const rc = 1.0 / (2 * Math.PI * 1000); // 1000Hz cutoff
     const dt = 1.0 / audioCtx.sampleRate;
     const alpha = rc / (rc + dt);
-    
-    // Track recent energy for local spike detection
-    const energyHistory = [0, 0];
 
     const detectLoop = () => {
       analyser.getFloatTimeDomainData(dataArray);
@@ -778,17 +777,17 @@ export default function Home() {
       const now = Date.now();
 
       // Adaptive Spike Logic: current must be > threshold AND significantly louder than previous frames
-      const localBackground = (energyHistory[0] + energyHistory[1]) / 2;
+      const localBackground = (energyHistoryRef.current[0] + energyHistoryRef.current[1]) / 2;
       const isLocalSpike = localBackground === 0 || sum > (localBackground * 2.5); // Unified to 2.5x spike
 
-      if (sum > threshold && isLocalSpike && (now - lastTriggerTime > 3000)) {
+      if (sum > threshold && isLocalSpike && (now - lastTriggerTimeRef.current > 3000)) {
         const timeSinceStart = recordingStartTimeRef.current ? (now - recordingStartTimeRef.current) : 0;
         
         // Conditions to trigger:
         // 1. Not recording (Preflight mode)
         // 2. Recording and > 1s has passed
         if (!isRecordingRef.current || timeSinceStart > 1000) {
-          lastTriggerTime = now;
+          lastTriggerTimeRef.current = now;
           
           if (isRecordingRef.current) {
             impactTimesRef.current.push(timeSinceStart / 1000);
@@ -803,8 +802,8 @@ export default function Home() {
       }
 
       // Update history for next frame
-      energyHistory.shift();
-      energyHistory.push(sum);
+      energyHistoryRef.current.shift();
+      energyHistoryRef.current.push(sum);
 
       audioLoopRef.current = requestAnimationFrame(detectLoop);
     };
@@ -823,6 +822,10 @@ export default function Home() {
     recordingStartTimeRef.current = Date.now();
     impactTimesRef.current = [];
     setShotCount(0);
+    
+    // Reset audio detection state for the new recording session
+    lastTriggerTimeRef.current = 0;
+    energyHistoryRef.current = [0, 0];
     
     // Clear previous session metadata for the new recording
     setSessionName('');
@@ -883,26 +886,55 @@ export default function Home() {
 
         // Instant UI transition with placeholders
         setClips(new Array(impacts.length).fill(null));
+        setPosters(new Array(impacts.length).fill(null));
         const initialNotes = new Array(impacts.length).fill('');
         const initialFavorites = new Array(impacts.length).fill(false);
         setShotNotes(initialNotes);
         setFavorites(initialFavorites);
         setAppState('gallery');
 
-        const clipResults = await processSwings(
+        // 1. Create the session in DB immediately with "empty" slots
+        // This ensures the session exists even if the browser is closed mid-process
+        const sessionId = Date.now();
+        setCurrentSessionId(sessionId);
+        const placeholderClips = initialNotes.map(() => ({
+          blob: new Blob([], { type: 'video/mp4' }), // Temporary empty blob
+          shotNote: '',
+          isFavorite: false
+        }));
+
+        const newSession: Session = {
+          id: sessionId,
+          date: new Date(),
+          sessionName: '',
+          sessionNotes: '',
+          clips: placeholderClips
+        };
+        await saveSession(newSession);
+        await loadHistory();
+
+        // 2. Process and update one-by-one
+        await processSwings(
           fullVideoBlob, 
           impacts, 
           setProgressText,
-          (index, clipUrl) => {
+          async (index, clipUrl, clipBlob, posterUrl, posterBlob) => {
             setClips(prev => {
               const next = [...prev];
               next[index] = clipUrl;
               return next;
             });
+            if (posterUrl) {
+              setPosters(prev => {
+                const next = [...prev];
+                next[index] = posterUrl;
+                return next;
+              });
+            }
+            // Save each clip to DB as soon as it's ready
+            await persistIncrementalClip(sessionId, index, clipBlob, posterBlob);
           }
         );
-        
-        await persistSession(clipResults.map(c => c.url), initialNotes, initialFavorites, clipResults.map(c => c.blob));
       } catch (err) {
         console.error("Processing error:", err);
         alert("Error processing video.");
@@ -931,7 +963,9 @@ export default function Home() {
 
   const resetApp = () => {
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
+    posters.forEach(url => { if (url) URL.revokeObjectURL(url); });
     setClips([]);
+    setPosters([]);
     setSelectedClipIndex(null);
     setSessionNotes('');
     setShotNotes([]);
@@ -1007,6 +1041,10 @@ export default function Home() {
     const urlToRemove = newClips[index];
     newClips.splice(index, 1);
     
+    const newPosters = [...posters];
+    const posterToRemove = newPosters[index];
+    newPosters.splice(index, 1);
+    
     const newNotes = [...shotNotes];
     newNotes.splice(index, 1);
     
@@ -1014,10 +1052,12 @@ export default function Home() {
     newFavs.splice(index, 1);
     
     setClips(newClips);
+    setPosters(newPosters);
     setShotNotes(newNotes);
     setFavorites(newFavs);
     
     if (urlToRemove) URL.revokeObjectURL(urlToRemove);
+    if (posterToRemove) URL.revokeObjectURL(posterToRemove);
 
     if (currentSessionId !== null) {
       try {
@@ -1214,7 +1254,12 @@ export default function Home() {
                   <div className="flex gap-2 mt-3 overflow-hidden h-12">
                     {session.clips.slice(0, 5).map((clip, idx) => (
                       <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
-                        <video src={`${URL.createObjectURL(clip.blob)}#t=0.001`} className="w-full h-full object-cover" preload="metadata" />
+                        <video 
+                          src={URL.createObjectURL(clip.blob)} 
+                          poster={clip.posterBlob ? URL.createObjectURL(clip.posterBlob) : undefined}
+                          className="w-full h-full object-cover" 
+                          preload="metadata" 
+                        />
                       </div>
                     ))}
                     {session.clips.length > 5 && (
@@ -1264,7 +1309,14 @@ export default function Home() {
                      <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
                        {clipUrl ? (
                          <>
-                           <video src={`${clipUrl}#t=0.001`} className="w-full h-full object-cover pointer-events-none" muted playsInline preload="metadata" />
+                           <video 
+                             src={clipUrl} 
+                             poster={posters[idx] || undefined}
+                             className="w-full h-full object-cover pointer-events-none" 
+                             muted 
+                             playsInline 
+                             preload="metadata" 
+                           />
                            {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
                            <button 
                              onClick={(e) => toggleFavorite(idx, e)}
@@ -1309,6 +1361,7 @@ export default function Home() {
                   ref={mainVideoRef} 
                   key={clips[selectedClipIndex] as string} 
                   src={clips[selectedClipIndex] as string} 
+                  poster={posters[selectedClipIndex] || undefined}
                   autoPlay 
                   loop 
                   playsInline 
