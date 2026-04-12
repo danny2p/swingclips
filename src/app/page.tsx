@@ -546,39 +546,27 @@ export default function Home() {
     }
   };
 
-  const persistSession = async (clipUrls: string[], notes: string[], favs: boolean[], providedBlobs?: Blob[], posterBlobs?: (Blob | undefined)[]) => {
+  const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob, posterBlob?: Blob) => {
     try {
-      const clipBlobs = await Promise.all(clipUrls.map(async (url, idx) => {
-        let blob = providedBlobs ? providedBlobs[idx] : null;
-        if (!blob) {
-          const res = await fetch(url);
-          blob = await res.blob();
-        }
-        
-        const pBlob = posterBlobs ? posterBlobs[idx] : undefined;
-        
-        return { 
-          blob, 
-          posterBlob: pBlob,
-          shotNote: notes[idx] || '', 
-          isFavorite: favs[idx] || false 
-        };
-      }));
+      const allSessions = await getAllSessions();
+      const currentSession = allSessions.find(s => s.id === sessionId);
+      if (!currentSession) return;
 
-      const sessionId = Date.now();
-      const newSession: Session = {
-        id: sessionId,
-        date: new Date(),
-        sessionName: '',
-        sessionNotes: '',
-        clips: clipBlobs
+      const updatedClips = [...currentSession.clips];
+      updatedClips[index] = {
+        ...updatedClips[index],
+        blob: videoBlob,
+        posterBlob: posterBlob,
       };
 
-      await saveSession(newSession);
-      setCurrentSessionId(sessionId);
-      await loadHistory();
+      const updatedSession: Session = {
+        ...currentSession,
+        clips: updatedClips
+      };
+      await saveSession(updatedSession);
+      await loadHistory(); // Refresh history list
     } catch (err) {
-      console.error("Error persisting session:", err);
+      console.error("Error persisting incremental clip:", err);
     }
   };
 
@@ -905,11 +893,32 @@ export default function Home() {
         setFavorites(initialFavorites);
         setAppState('gallery');
 
-        const clipResults = await processSwings(
+        // 1. Create the session in DB immediately with "empty" slots
+        // This ensures the session exists even if the browser is closed mid-process
+        const sessionId = Date.now();
+        setCurrentSessionId(sessionId);
+        const placeholderClips = initialNotes.map(() => ({
+          blob: new Blob([], { type: 'video/mp4' }), // Temporary empty blob
+          shotNote: '',
+          isFavorite: false
+        }));
+
+        const newSession: Session = {
+          id: sessionId,
+          date: new Date(),
+          sessionName: '',
+          sessionNotes: '',
+          clips: placeholderClips
+        };
+        await saveSession(newSession);
+        await loadHistory();
+
+        // 2. Process and update one-by-one
+        await processSwings(
           fullVideoBlob, 
           impacts, 
           setProgressText,
-          (index, clipUrl, clipBlob, posterUrl) => {
+          async (index, clipUrl, clipBlob, posterUrl, posterBlob) => {
             setClips(prev => {
               const next = [...prev];
               next[index] = clipUrl;
@@ -922,15 +931,9 @@ export default function Home() {
                 return next;
               });
             }
+            // Save each clip to DB as soon as it's ready
+            await persistIncrementalClip(sessionId, index, clipBlob, posterBlob);
           }
-        );
-        
-        await persistSession(
-          clipResults.map(c => c.url), 
-          initialNotes, 
-          initialFavorites, 
-          clipResults.map(c => c.blob),
-          clipResults.map(c => c.posterBlob)
         );
       } catch (err) {
         console.error("Processing error:", err);
