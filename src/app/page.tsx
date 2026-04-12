@@ -34,8 +34,8 @@ export default function Home() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [activeDeviceName, setActiveDeviceName] = useState('');
   const [showDeviceToast, setShowDeviceToast] = useState(false);
-  const [sensitivity, setSensitivity] = useState(80);
-  const sensitivityRef = useRef(80);
+  const [sensitivity, setSensitivity] = useState(100);
+  const sensitivityRef = useRef(100);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [maxZoom, setMaxZoom] = useState(1);
   

@@ -1,4 +1,4 @@
-export async function detectImpacts(videoBlob: Blob, sensitivity: number = 85): Promise<number[]> {
+export async function detectImpacts(videoBlob: Blob, sensitivity: number = 100): Promise<number[]> {
   // Use standard AudioContext with fallback for older WebKit
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
   const audioContext = new AudioContextClass();
