@@ -652,7 +652,7 @@ export default function Home() {
     // Clear old URLs
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
     
-    const newUrls = session.clips.map(c => URL.createObjectURL(new Blob([c.data], { type: 'video/mp4' })));
+    const newUrls = session.clips.map(c => URL.createObjectURL(new Blob([c.data as any], { type: 'video/mp4' })));
     const newShotNotes = session.clips.map(c => c.shotNote);
     const newFavorites = session.clips.map(c => c.isFavorite || false);
     
@@ -1312,7 +1312,7 @@ export default function Home() {
                     {session.clips.slice(0, 5).map((clip, idx) => (
                       <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
                         <video 
-                          src={`${URL.createObjectURL(new Blob([clip.data], { type: 'video/mp4' }))}#t=2`} 
+                          src={`${URL.createObjectURL(new Blob([clip.data as any], { type: 'video/mp4' }))}#t=2`} 
                           className="w-full h-full object-cover" 
                           preload="metadata" 
                         />
