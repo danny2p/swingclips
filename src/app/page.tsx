@@ -1314,7 +1314,8 @@ export default function Home() {
                         <video 
                           src={`${URL.createObjectURL(new Blob([clip.data as any], { type: 'video/mp4' }))}#t=2`} 
                           className="w-full h-full object-cover" 
-                          preload="metadata" 
+                          preload="auto" 
+                          onLoadedData={(e) => { e.currentTarget.currentTime = 2.001; }}
                         />
                       </div>
                     ))}
@@ -1370,7 +1371,8 @@ export default function Home() {
                              className="w-full h-full object-cover pointer-events-none" 
                              muted 
                              playsInline 
-                             preload="metadata" 
+                             preload="auto" 
+                             onLoadedData={(e) => { e.currentTarget.currentTime = 2.001; }}
                            />
                            {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
                            <button 
