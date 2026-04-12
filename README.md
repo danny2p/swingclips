@@ -8,7 +8,7 @@ It transforms your mobile device into a swing recording and review station, auto
 
 ## 💡 How to Use
 
-1. **Set Up:** Place your phone on a tripod or stand facing your swing path.
+1. **Set Up:** Place your phone on a tripod or stand facing your swing path. (https://amzn.to/4mqd6VZ is the $20 tripid I use, this is an affiliate link and buying through this link helps support development)
 2. **Record:** Tap the Record button.
 3. **Swing:** Hit as many balls as you like. Wait ~3 seconds between shots.
 4. **Review:** Stop recording and wait for processing. Each swing will appear in your gallery with full analysis tools (Slow-mo, Drawing) ready to go.

@@ -104,13 +104,15 @@ export async function processSwings(
     
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     try {
-      // Combined Command: Slice the video AND extract the first frame in ONE pass
-      // This is much more memory-efficient than running fm.exec twice.
+      // 1. Combined Pass: Open file ONCE, split stream in memory for two outputs
+      // This is the most memory-efficient way to get a video and a thumbnail.
       await fm.exec([
         '-ss', startTime.toString(), 
         '-i', activeInputFile, 
         '-t', duration.toString(),
-        // Output 1: The Sliced Video
+        '-filter_complex', '[0:v]split=2[v1][v2]',
+        '-map', '[v1]',
+        '-map', '0:a?', 
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-crf', '28',
@@ -120,10 +122,9 @@ export async function processSwings(
         '-c:a', 'aac',
         '-b:a', '128k',
         outputFileName,
-        // Output 2: The Poster Image (first frame of the slice)
-        '-ss', '0',
+        '-map', '[v2]',
         '-vframes', '1',
-        '-q:v', '2',
+        '-f', 'image2',
         posterFileName
       ]);
 
