@@ -46,12 +46,15 @@ export default function Home() {
   const recordingStartTimeRef = useRef(0);
   const impactTimesRef = useRef<number[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const [liveVolume, setLiveVolume] = useState(0);
   const [isPreflightTriggered, setIsPreflightTriggered] = useState(false);
-
   const audioLoopRef = useRef<number | null>(null);
   const meterRef = useRef<HTMLDivElement>(null);
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
+
+  // Audio state refs for real-time detection
+  const lastTriggerTimeRef = useRef(0);
+  const energyHistoryRef = useRef([0, 0]);
+
 
   const playTickSound = () => {
     try {
@@ -552,7 +555,7 @@ export default function Home() {
           blob = await res.blob();
         }
         
-        let pBlob = posterBlobs ? posterBlobs[idx] : undefined;
+        const pBlob = posterBlobs ? posterBlobs[idx] : undefined;
         
         return { 
           blob, 
@@ -754,7 +757,6 @@ export default function Home() {
     source.connect(analyser);
 
     const dataArray = new Float32Array(analyser.fftSize);
-    let lastTriggerTime = 0;
 
     // Filter state
     let prevRaw = 0;
@@ -762,9 +764,6 @@ export default function Home() {
     const rc = 1.0 / (2 * Math.PI * 1000); // 1000Hz cutoff
     const dt = 1.0 / audioCtx.sampleRate;
     const alpha = rc / (rc + dt);
-    
-    // Track recent energy for local spike detection
-    const energyHistory = [0, 0];
 
     const detectLoop = () => {
       analyser.getFloatTimeDomainData(dataArray);
@@ -790,17 +789,17 @@ export default function Home() {
       const now = Date.now();
 
       // Adaptive Spike Logic: current must be > threshold AND significantly louder than previous frames
-      const localBackground = (energyHistory[0] + energyHistory[1]) / 2;
+      const localBackground = (energyHistoryRef.current[0] + energyHistoryRef.current[1]) / 2;
       const isLocalSpike = localBackground === 0 || sum > (localBackground * 2.5); // Unified to 2.5x spike
 
-      if (sum > threshold && isLocalSpike && (now - lastTriggerTime > 3000)) {
+      if (sum > threshold && isLocalSpike && (now - lastTriggerTimeRef.current > 3000)) {
         const timeSinceStart = recordingStartTimeRef.current ? (now - recordingStartTimeRef.current) : 0;
         
         // Conditions to trigger:
         // 1. Not recording (Preflight mode)
         // 2. Recording and > 1s has passed
         if (!isRecordingRef.current || timeSinceStart > 1000) {
-          lastTriggerTime = now;
+          lastTriggerTimeRef.current = now;
           
           if (isRecordingRef.current) {
             impactTimesRef.current.push(timeSinceStart / 1000);
@@ -815,8 +814,8 @@ export default function Home() {
       }
 
       // Update history for next frame
-      energyHistory.shift();
-      energyHistory.push(sum);
+      energyHistoryRef.current.shift();
+      energyHistoryRef.current.push(sum);
 
       audioLoopRef.current = requestAnimationFrame(detectLoop);
     };
@@ -835,6 +834,10 @@ export default function Home() {
     recordingStartTimeRef.current = Date.now();
     impactTimesRef.current = [];
     setShotCount(0);
+    
+    // Reset audio detection state for the new recording session
+    lastTriggerTimeRef.current = 0;
+    energyHistoryRef.current = [0, 0];
     
     // Clear previous session metadata for the new recording
     setSessionName('');
