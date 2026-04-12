@@ -18,8 +18,6 @@ export async function initFFmpeg(onProgress: (msg: string) => void): Promise<FFm
       
       onProgress(isIsolated ? 'Loading video core...' : 'Loading video core (standard mode)...');
       
-      // If we are not cross-origin isolated (Safari on many hosts), 
-      // we MUST NOT provide a workerURL, otherwise load() will hang.
       const loadOptions: any = {
         coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
@@ -57,8 +55,6 @@ export async function processSwings(
 ): Promise<{url: string, blob: Blob, posterUrl?: string, posterBlob?: Blob}[]> {
   const fm = await initFFmpeg(onProgress);
   
-  // Refined iOS detection: checking User Agent is more reliable than just blob type.
-  // This prevents Android devices (which often record MP4) from being penalized with slow seeking.
   const isIOS = typeof navigator !== 'undefined' && (
     /iPad|iPhone|iPod/.test(navigator.userAgent) || 
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -75,9 +71,6 @@ export async function processSwings(
 
   if (isIOS) {
     onProgress('Optimizing video for mobile slicing...');
-    // iOS Safari fragmented MP4s are hard to seek. We "fix" them once here
-    // so that we can use lightning-fast input seeking (-ss before -i) for all clips.
-    // Using -c copy is nearly instantaneous as it doesn't re-encode.
     try {
       await fm.exec([
         '-i', inputFileName,
@@ -100,19 +93,13 @@ export async function processSwings(
     const startTime = Math.max(0, impactTime - 2); 
     const duration = 4; 
     const outputFileName = `swing_${i}.mp4`;
-    const posterFileName = `poster_${i}.jpg`;
-    
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     try {
-      // 1. Combined Pass: Open file ONCE, split stream in memory for two outputs
-      // This is the most memory-efficient way to get a video and a thumbnail.
+      // FAST SLICING: No filter_complex, simple high-speed transcode
       await fm.exec([
         '-ss', startTime.toString(), 
         '-i', activeInputFile, 
-        '-t', duration.toString(),
-        '-filter_complex', '[0:v]split=2[v1][v2]',
-        '-map', '[v1]',
-        '-map', '0:a?', 
+        '-t', duration.toString(), 
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-crf', '28',
@@ -121,28 +108,19 @@ export async function processSwings(
         '-movflags', '+faststart',
         '-c:a', 'aac',
         '-b:a', '128k',
-        outputFileName,
-        '-map', '[v2]',
-        '-vframes', '1',
-        '-f', 'image2',
-        posterFileName
+        outputFileName
       ]);
-
       const data = await fm.readFile(outputFileName);
       const safeData = new Uint8Array(data as any);
       const clipBlob = new Blob([safeData], { type: 'video/mp4' });
       const url = URL.createObjectURL(clipBlob);
-
-      const posterData = await fm.readFile(posterFileName);
-      const safePosterData = new Uint8Array(posterData as any);
-      const posterBlob = new Blob([safePosterData], { type: 'image/jpeg' });
-      const posterUrl = URL.createObjectURL(posterBlob);
-
-      clipResults.push({url, blob: clipBlob, posterUrl, posterBlob});
-      if (onClipReady) onClipReady(i, url, clipBlob, posterUrl, posterBlob);
+      
+      // Note: posterUrl and posterBlob are null here, 
+      // we will generate them via Canvas in the UI.
+      clipResults.push({url, blob: clipBlob});
+      if (onClipReady) onClipReady(i, url, clipBlob);
       
       await fm.deleteFile(outputFileName);
-      await fm.deleteFile(posterFileName);
     } catch (err) {
       onProgress(`Error on swing ${i + 1}...`);
     }

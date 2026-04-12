@@ -6,6 +6,45 @@ import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
 import { Session, getAllSessions, saveSession, deleteSession } from '@/utils/db';
 import JSZip from 'jszip';
 
+const generatePoster = (videoBlob: Blob): Promise<{url: string, blob: Blob}> => {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    const url = URL.createObjectURL(videoBlob);
+    video.src = url;
+    
+    video.onloadedmetadata = () => {
+      // Seek to 1s or half duration to get a good frame
+      video.currentTime = Math.min(1, video.duration / 2);
+    };
+
+    video.onseeked = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const posterUrl = URL.createObjectURL(blob);
+            resolve({ url: posterUrl, blob });
+          }
+          URL.revokeObjectURL(url);
+        }, 'image/jpeg', 0.8);
+      } else {
+        URL.revokeObjectURL(url);
+      }
+    };
+
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+    };
+  });
+};
+
 export default function Home() {
   // App states: 'camera' | 'processing' | 'gallery' | 'history'
   const [appState, setAppState] = useState<'camera' | 'processing' | 'gallery' | 'history'>('camera');
@@ -972,15 +1011,25 @@ export default function Home() {
               next[index] = clipUrl;
               return next;
             });
-            if (posterUrl) {
+            
+            let finalPosterUrl = posterUrl;
+            let finalPosterBlob = posterBlob;
+
+            if (!finalPosterUrl) {
+              const poster = await generatePoster(clipBlob);
+              finalPosterUrl = poster.url;
+              finalPosterBlob = poster.blob;
+            }
+
+            if (finalPosterUrl) {
               setPosters(prev => {
                 const next = [...prev];
-                next[index] = posterUrl;
+                next[index] = finalPosterUrl;
                 return next;
               });
             }
             // Save each clip to DB as soon as it's ready
-            await persistIncrementalClip(sessionId, index, clipBlob, posterBlob);
+            await persistIncrementalClip(sessionId, index, clipBlob, finalPosterBlob);
           }
         );
 
@@ -1228,7 +1277,7 @@ export default function Home() {
             {!isRecording && (
               <div className="mb-8 flex flex-col items-center w-72 bg-black/40 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-2xl pointer-events-auto">
                 <div className="flex justify-between w-full text-[10px] font-bold text-gray-400 mb-3 uppercase tracking-widest">
-                  <span>Audio Sensitivity</span>
+                  <span>Audio Sensitivity Adjustment</span>
                   <div className={`w-2 h-2 rounded-full transition-all duration-300 ${isPreflightTriggered ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-gray-600'}`}></div>
                 </div>
                 
@@ -1607,9 +1656,9 @@ export default function Home() {
               {showNotes && (
                 <div className="absolute inset-x-0 bottom-32 px-6 z-50 animate-in slide-in-from-bottom duration-300">
                   <div className="max-w-xl mx-auto bg-gray-900/90 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl">
-                    <div className="flex items-center gap-2 mb-3 text-blue-400">
+                    <div className="flex items-center gap-2 mb-2 text-blue-400">
                       <FileText className="w-5 h-5" />
-                      <h3 className="font-bold text-sm uppercase tracking-wider">Swing Notes</h3>
+                      <h3 className="font-bold text-sm uppercase tracking-wider">Clip Notes</h3>
                     </div>
                     <textarea 
                       value={shotNotes[selectedClipIndex]} 
