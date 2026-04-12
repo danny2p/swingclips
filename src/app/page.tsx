@@ -105,6 +105,52 @@ export default function Home() {
     osc.stop(t + 0.4);
   };
 
+  const playLevelCompleteSound = () => {
+    try {
+      if (!playbackAudioContextRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        playbackAudioContextRef.current = new AudioContextClass();
+      }
+      const ctx = playbackAudioContextRef.current;
+      
+      // Explicitly resume for Safari
+      if (ctx.state === 'suspended') {
+        ctx.resume().then(() => {
+          console.log("AudioContext resumed successfully for completion sound");
+          triggerLevelCompleteNotes(ctx);
+        });
+      } else {
+        triggerLevelCompleteNotes(ctx);
+      }
+    } catch (e) {
+      console.error("Audio error:", e);
+    }
+  };
+
+  const triggerLevelCompleteNotes = (ctx: AudioContext) => {
+    const t = ctx.currentTime;
+    // We'll play a 3-note ascending arpeggio (C4, E4, G4, C5)
+    const notes = [261.63, 329.63, 392.00, 523.25];
+    
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = 'square'; // 8-bit retro feel
+      osc.frequency.setValueAtTime(freq, t + (i * 0.1));
+      
+      gain.gain.setValueAtTime(0, t + (i * 0.1));
+      gain.gain.linearRampToValueAtTime(0.1, t + (i * 0.1) + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + (i * 0.1) + 0.15);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start(t + (i * 0.1));
+      osc.stop(t + (i * 0.1) + 0.15);
+    });
+  };
+
   // Processing
   const [progressText, setProgressText] = useState('');
   const [isBurning, setIsBurning] = useState(false);
@@ -847,32 +893,35 @@ export default function Home() {
       // Announce count safely to prevent cut-offs on Android/mobile
       window.speechSynthesis.cancel(); // Clear any hung queues
       const count = impacts.length;
-      
+
       const utterance = new SpeechSynthesisUtterance(`${count} shot${count !== 1 ? 's' : ''} detected`);
       (window as any).__currentUtterance = utterance; // Global ref to prevent GC
-      
+
       const voices = voicesRef.current;
-      const preferredVoice = voices.find(v => v.name.includes('Siri') || v.name.includes('Samantha') || v.name.includes('Google US English')) 
-                          || voices.find(v => v.lang.startsWith('en-US')) 
+      const preferredVoice = voices.find(v => v.name.includes('Siri') || v.name.includes('Samantha') || v.name.includes('Google US English'))
+                          || voices.find(v => v.lang.startsWith('en-US'))
                           || voices.find(v => v.lang.startsWith('en'));
-      
+
       if (preferredVoice) {
         utterance.voice = preferredVoice;
       }
-      utterance.rate = 0.95; 
+      utterance.rate = 0.95;
 
       // Create a promise that resolves when the voice FINISHES speaking
       const speechFinished = new Promise((resolve) => {
         utterance.onend = () => resolve(true);
         utterance.onerror = () => resolve(true);
-        // Fallback: if voice hasn't finished in 3 seconds, just proceed anyway
-        setTimeout(() => resolve(true), 3000);
+        // Fallback: if voice hasn't finished in 4 seconds, just proceed anyway
+        setTimeout(() => resolve(true), 4000);
       });
-      
-      window.speechSynthesis.speak(utterance);
 
-      const fullVideoBlob = new Blob(chunks, { type: mediaRecorder.mimeType });
-      
+      // Small delay on Android specifically to ensure the 'cancel' is fully processed
+      // and the UI transition has settled before speaking.
+      setTimeout(() => {
+        window.speechSynthesis.speak(utterance);
+      }, 300);
+
+      const fullVideoBlob = new Blob(chunks, { type: mediaRecorder.mimeType });      
       try {
         if (impacts.length === 0) {
           alert("No swings detected. Try again and adjust sensitivity.");
@@ -934,6 +983,9 @@ export default function Home() {
             await persistIncrementalClip(sessionId, index, clipBlob, posterBlob);
           }
         );
+
+        // Notify user that processing is complete
+        playLevelCompleteSound();
       } catch (err) {
         console.error("Processing error:", err);
         alert("Error processing video.");
@@ -946,6 +998,16 @@ export default function Home() {
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
+      // Ensure context exists and is resumed during this user gesture for Safari
+      if (!playbackAudioContextRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        playbackAudioContextRef.current = new AudioContextClass();
+      }
+      
+      if (playbackAudioContextRef.current.state === 'suspended') {
+        playbackAudioContextRef.current.resume();
+      }
+
       isRecordingRef.current = false;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
