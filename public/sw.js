@@ -1,7 +1,9 @@
-const CACHE_NAME = 'swingclips-cache-v14';
+const CACHE_NAME = 'swingclips-cache-v15';
 const PRE_CACHE = [
   '/',
   '/manifest.json',
+  '/favicon.png',
+  '/gg-logo-square.png',
   '/ffmpeg/ffmpeg-core.js',
   '/ffmpeg/ffmpeg-core.wasm',
   '/ffmpeg/ffmpeg-core.worker.js'
@@ -31,15 +33,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   
-  // SURGICAL INTERCEPTION:
-  // Only intercept requests for the /ffmpeg/ directory to provide caching.
-  // We leave ALL Next.js internal chunks and workers alone so that Safari
-  // handles them natively without the "foreign origin" bug.
+  // Custom caching for FFMPEG assets
   if (url.pathname.includes('/ffmpeg/')) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
         return cached || fetch(event.request).then((response) => {
-          if (!response || response.status !== 200 || response.type !== 'basic') {
+          if (!response || response.status !== 200) {
             return response;
           }
           const responseToCache = response.clone();
@@ -50,8 +49,26 @@ self.addEventListener('fetch', (event) => {
         });
       })
     );
+    return;
   }
   
-  // For everything else, do NOT call event.respondWith().
-  // This allows the browser to handle the fetch directly.
+  // Generic response to satisfy Chrome's PWA install criteria
+  // We don't necessarily cache everything else to avoid breaking Next.js hot-reloading
+  // but we MUST provide a response for the fetch event.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return caches.match('/');
+      })
+    );
+  } else {
+    // For other assets, we can just let them pass through, 
+    // but some versions of Chrome require respondWith to be called.
+    // If it's already in the cache (like our pre-cached icons), serve it.
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        return cached || fetch(event.request);
+      })
+    );
+  }
 });
