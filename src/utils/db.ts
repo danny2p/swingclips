@@ -5,6 +5,7 @@
 
 export interface SwingClip {
   data: Uint8Array; // Using Uint8Array instead of Blob for better Safari/IndexedDB stability
+  thumbnail?: string; // Base64 image string for stable thumbnails
   shotNote: string;
   isFavorite?: boolean;
 }

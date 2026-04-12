@@ -163,6 +163,7 @@ export default function Home() {
 
   // Gallery
   const [clips, setClips] = useState<(string | null)[]>([]);
+  const [thumbnails, setThumbnails] = useState<(string | null)[]>([]);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
   const [sessionName, setSessionName] = useState('');
   const [sessionNotes, setSessionNotes] = useState('');
@@ -590,7 +591,7 @@ export default function Home() {
     }
   };
 
-  const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob) => {
+  const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob, thumbnailData?: Uint8Array) => {
     try {
       const allSessions = await getAllSessions();
       const currentSession = allSessions.find(s => s.id === sessionId);
@@ -598,11 +599,20 @@ export default function Home() {
 
       const arrayBuffer = await videoBlob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
+      
+      // Convert raw JPEG bytes to Base64 for stable storage
+      let thumbnailBase64 = '';
+      if (thumbnailData) {
+        // Use a more memory-efficient way to convert Uint8Array to base64
+        const binary = Array.from(thumbnailData).map(b => String.fromCharCode(b)).join('');
+        thumbnailBase64 = `data:image/jpeg;base64,${window.btoa(binary)}`;
+      }
 
       const updatedClips = [...currentSession.clips];
       updatedClips[index] = {
         ...updatedClips[index],
         data: uint8Array,
+        thumbnail: thumbnailBase64
       };
 
       const updatedSession: Session = {
@@ -610,6 +620,16 @@ export default function Home() {
         clips: updatedClips
       };
       await saveSession(updatedSession);
+      
+      // Update UI state
+      if (thumbnailBase64) {
+        setThumbnails(prev => {
+          const next = [...prev];
+          next[index] = thumbnailBase64;
+          return next;
+        });
+      }
+
       await loadHistory(); // Refresh history list
     } catch (err) {
       console.error("Error persisting incremental clip:", err);
@@ -653,10 +673,12 @@ export default function Home() {
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
     
     const newUrls = session.clips.map(c => URL.createObjectURL(new Blob([c.data as any], { type: 'video/mp4' })));
+    const newThumbnails = session.clips.map(c => c.thumbnail || null);
     const newShotNotes = session.clips.map(c => c.shotNote);
     const newFavorites = session.clips.map(c => c.isFavorite || false);
     
     setClips(newUrls);
+    setThumbnails(newThumbnails);
     setShotNotes(newShotNotes);
     setFavorites(newFavorites);
     setSessionName(session.sessionName || '');
@@ -932,6 +954,7 @@ export default function Home() {
 
         // Instant UI transition with placeholders
         setClips(new Array(impacts.length).fill(null));
+        setThumbnails(new Array(impacts.length).fill(null));
         const initialNotes = new Array(impacts.length).fill('');
         const initialFavorites = new Array(impacts.length).fill(false);
         setShotNotes(initialNotes);
@@ -963,7 +986,7 @@ export default function Home() {
           fullVideoBlob, 
           impacts, 
           setProgressText,
-          async (index, clipUrl, clipBlob) => {
+          async (index, clipUrl, clipBlob, thumbnail) => {
             setClips(prev => {
               const next = [...prev];
               next[index] = clipUrl;
@@ -971,7 +994,7 @@ export default function Home() {
             });
             
             // Save each clip to DB as soon as it's ready
-            await persistIncrementalClip(sessionId, index, clipBlob);
+            await persistIncrementalClip(sessionId, index, clipBlob, thumbnail);
           }
         );
 
@@ -1016,6 +1039,7 @@ export default function Home() {
   const resetApp = () => {
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
     setClips([]);
+    setThumbnails([]);
     setSelectedClipIndex(null);
     setSessionNotes('');
     setShotNotes([]);
@@ -1094,11 +1118,15 @@ export default function Home() {
     const newNotes = [...shotNotes];
     newNotes.splice(index, 1);
     
+    const newThumbnails = [...thumbnails];
+    newThumbnails.splice(index, 1);
+    
     const newFavs = [...favorites];
     newFavs.splice(index, 1);
     
     setClips(newClips);
     setShotNotes(newNotes);
+    setThumbnails(newThumbnails);
     setFavorites(newFavs);
 
     // Update selectedClipIndex if we're deleting from within review or before it
@@ -1311,12 +1339,17 @@ export default function Home() {
                   <div className="flex gap-2 mt-3 overflow-hidden h-12">
                     {session.clips.slice(0, 5).map((clip, idx) => (
                       <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
-                        <video 
-                          src={`${URL.createObjectURL(new Blob([clip.data as any], { type: 'video/mp4' }))}#t=2`} 
-                          className="w-full h-full object-cover" 
-                          preload="auto" 
-                          onLoadedData={(e) => { e.currentTarget.currentTime = 2.001; }}
-                        />
+                        {clip.thumbnail ? (
+                          <img 
+                            src={clip.thumbnail} 
+                            className="w-full h-full object-cover" 
+                            alt={`Swing ${idx + 1}`}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                            <Video className="w-4 h-4 text-gray-600" />
+                          </div>
+                        )}
                       </div>
                     ))}
                     {session.clips.length > 5 && (
@@ -1366,14 +1399,21 @@ export default function Home() {
                      <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
                        {clipUrl ? (
                          <>
-                           <video 
-                             src={`${clipUrl}#t=2`}
-                             className="w-full h-full object-cover pointer-events-none" 
-                             muted 
-                             playsInline 
-                             preload="auto" 
-                             onLoadedData={(e) => { e.currentTarget.currentTime = 2.001; }}
-                           />
+                           {thumbnails[idx] ? (
+                             <img 
+                               src={thumbnails[idx] as string} 
+                               className="w-full h-full object-cover pointer-events-none" 
+                               alt={`Swing ${idx + 1}`}
+                             />
+                           ) : (
+                             <video 
+                               src={`${clipUrl}#t=2`}
+                               className="w-full h-full object-cover pointer-events-none" 
+                               muted 
+                               playsInline 
+                               preload="auto" 
+                             />
+                           )}
                            {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
                            <button 
                              onClick={(e) => toggleFavorite(idx, e)}

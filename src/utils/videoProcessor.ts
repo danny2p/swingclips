@@ -51,8 +51,8 @@ export async function processSwings(
   videoBlob: Blob, 
   impacts: number[], 
   onProgress: (progress: string) => void,
-  onClipReady?: (index: number, clipUrl: string, clipBlob: Blob) => void
-): Promise<{url: string, blob: Blob}[]> {
+  onClipReady?: (index: number, clipUrl: string, clipBlob: Blob, thumbnail?: Uint8Array) => void
+): Promise<{url: string, blob: Blob, thumbnail?: Uint8Array}[]> {
   const fm = await initFFmpeg(onProgress);
   
   const isIOS = typeof navigator !== 'undefined' && (
@@ -86,39 +86,38 @@ export async function processSwings(
     }
   }
 
-  const clipResults: {url: string, blob: Blob}[] = [];
+  const clipResults: {url: string, blob: Blob, thumbnail?: Uint8Array}[] = [];
   
   for (let i = 0; i < impacts.length; i++) {
     const impactTime = impacts[i];
     const startTime = Math.max(0, impactTime - 2); 
     const duration = 4; 
     const outputFileName = `swing_${i}.mp4`;
+    const thumbFileName = `thumb_${i}.jpg`;
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     try {
-      // FAST SLICING: No filter_complex, simple high-speed transcode
+      // COMBINED FAST PASS: Slice video and extract impact frame (2s into clip) in one go
       await fm.exec([
         '-ss', startTime.toString(), 
         '-i', activeInputFile, 
-        '-t', duration.toString(), 
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-crf', '28',
-        '-g', '5',
-        '-threads', '0',
-        '-movflags', '+faststart',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        outputFileName
+        '-t', duration.toString(),
+        '-filter_complex', '[0:v]split=2[v1][v2]',
+        '-map', '[v1]', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-g', '5', '-threads', '0', '-movflags', '+faststart', '-c:a', 'aac', '-b:a', '128k', outputFileName,
+        '-map', '[v2]', '-ss', '2', '-vframes', '1', '-f', 'image2', thumbFileName
       ]);
+
       const data = await fm.readFile(outputFileName);
-      const safeData = new Uint8Array(data as any);
-      const clipBlob = new Blob([safeData], { type: 'video/mp4' });
+      const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
       const url = URL.createObjectURL(clipBlob);
+
+      const thumbData = await fm.readFile(thumbFileName);
+      const thumbnail = new Uint8Array(thumbData as any);
       
-      clipResults.push({url, blob: clipBlob});
-      if (onClipReady) onClipReady(i, url, clipBlob);
+      clipResults.push({url, blob: clipBlob, thumbnail});
+      if (onClipReady) onClipReady(i, url, clipBlob, thumbnail);
       
       await fm.deleteFile(outputFileName);
+      await fm.deleteFile(thumbFileName);
     } catch (err) {
       onProgress(`Error on swing ${i + 1}...`);
     }
