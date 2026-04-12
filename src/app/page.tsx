@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, RefreshCw, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
-import { detectImpacts } from '@/utils/audioProcessor';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
 import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
 import { Session, getAllSessions, saveSession, deleteSession } from '@/utils/db';
 import JSZip from 'jszip';
@@ -1055,6 +1054,19 @@ export default function Home() {
     setPosters(newPosters);
     setShotNotes(newNotes);
     setFavorites(newFavs);
+
+    // Update selectedClipIndex if we're deleting from within review or before it
+    if (selectedClipIndex !== null) {
+      if (newClips.length === 0) {
+        setSelectedClipIndex(null);
+      } else if (index === selectedClipIndex) {
+        if (index >= newClips.length) {
+          setSelectedClipIndex(newClips.length - 1);
+        }
+      } else if (index < selectedClipIndex) {
+        setSelectedClipIndex(selectedClipIndex - 1);
+      }
+    }
     
     if (urlToRemove) URL.revokeObjectURL(urlToRemove);
     if (posterToRemove) URL.revokeObjectURL(posterToRemove);
@@ -1249,7 +1261,7 @@ export default function Home() {
                     <button onClick={(e) => deleteHistorySession(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                   </div>
                   {session.sessionNotes && (
-                    <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">"{session.sessionNotes}"</p>
+                    <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">&quot;{session.sessionNotes}&quot;</p>
                   )}
                   <div className="flex gap-2 mt-3 overflow-hidden h-12">
                     {session.clips.slice(0, 5).map((clip, idx) => (
@@ -1518,6 +1530,13 @@ export default function Home() {
                   </button>
                   <button onClick={handleFullscreenShare} className="p-2.5 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Share"><Share2 className="w-5 h-5" /></button>
                   <button onClick={handleFullscreenDownload} className="p-2.5 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Download"><Download className="w-5 h-5" /></button>
+                  <button 
+                    onClick={(e) => selectedClipIndex !== null && deleteClip(selectedClipIndex, e)} 
+                    className="p-2.5 bg-gray-800 text-red-400 rounded-full shadow-lg active:scale-90 transition-transform hover:bg-red-900/40" 
+                    title="Delete"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
                   <button onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(null); }} className="p-2.5 bg-gray-800 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Close"><X className="w-5 h-5" /></button>
                 </div>
               </div>
