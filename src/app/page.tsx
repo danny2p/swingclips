@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, RefreshCw, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
-import { detectImpacts } from '@/utils/audioProcessor';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
 import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
 import { Session, getAllSessions, saveSession, deleteSession } from '@/utils/db';
 import JSZip from 'jszip';
@@ -35,8 +34,8 @@ export default function Home() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [activeDeviceName, setActiveDeviceName] = useState('');
   const [showDeviceToast, setShowDeviceToast] = useState(false);
-  const [sensitivity, setSensitivity] = useState(80);
-  const sensitivityRef = useRef(80);
+  const [sensitivity, setSensitivity] = useState(100);
+  const sensitivityRef = useRef(100);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [maxZoom, setMaxZoom] = useState(1);
   
@@ -106,6 +105,52 @@ export default function Home() {
     osc.stop(t + 0.4);
   };
 
+  const playLevelCompleteSound = () => {
+    try {
+      if (!playbackAudioContextRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        playbackAudioContextRef.current = new AudioContextClass();
+      }
+      const ctx = playbackAudioContextRef.current;
+      
+      // Explicitly resume for Safari
+      if (ctx.state === 'suspended') {
+        ctx.resume().then(() => {
+          console.log("AudioContext resumed successfully for completion sound");
+          triggerLevelCompleteNotes(ctx);
+        });
+      } else {
+        triggerLevelCompleteNotes(ctx);
+      }
+    } catch (e) {
+      console.error("Audio error:", e);
+    }
+  };
+
+  const triggerLevelCompleteNotes = (ctx: AudioContext) => {
+    const t = ctx.currentTime;
+    // We'll play a 3-note ascending arpeggio (C4, E4, G4, C5)
+    const notes = [261.63, 329.63, 392.00, 523.25];
+    
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = 'square'; // 8-bit retro feel
+      osc.frequency.setValueAtTime(freq, t + (i * 0.1));
+      
+      gain.gain.setValueAtTime(0, t + (i * 0.1));
+      gain.gain.linearRampToValueAtTime(0.1, t + (i * 0.1) + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + (i * 0.1) + 0.15);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start(t + (i * 0.1));
+      osc.stop(t + (i * 0.1) + 0.15);
+    });
+  };
+
   // Processing
   const [progressText, setProgressText] = useState('');
   const [isBurning, setIsBurning] = useState(false);
@@ -118,7 +163,7 @@ export default function Home() {
 
   // Gallery
   const [clips, setClips] = useState<(string | null)[]>([]);
-  const [posters, setPosters] = useState<(string | null)[]>([]);
+  const [thumbnails, setThumbnails] = useState<(string | null)[]>([]);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
   const [sessionName, setSessionName] = useState('');
   const [sessionNotes, setSessionNotes] = useState('');
@@ -546,17 +591,28 @@ export default function Home() {
     }
   };
 
-  const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob, posterBlob?: Blob) => {
+  const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob, thumbnailData?: Uint8Array) => {
     try {
       const allSessions = await getAllSessions();
       const currentSession = allSessions.find(s => s.id === sessionId);
       if (!currentSession) return;
 
+      const arrayBuffer = await videoBlob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      
+      // Convert raw JPEG bytes to Base64 for stable storage
+      let thumbnailBase64 = '';
+      if (thumbnailData) {
+        // Use a more memory-efficient way to convert Uint8Array to base64
+        const binary = Array.from(thumbnailData).map(b => String.fromCharCode(b)).join('');
+        thumbnailBase64 = `data:image/jpeg;base64,${window.btoa(binary)}`;
+      }
+
       const updatedClips = [...currentSession.clips];
       updatedClips[index] = {
         ...updatedClips[index],
-        blob: videoBlob,
-        posterBlob: posterBlob,
+        data: uint8Array,
+        thumbnail: thumbnailBase64
       };
 
       const updatedSession: Session = {
@@ -564,6 +620,16 @@ export default function Home() {
         clips: updatedClips
       };
       await saveSession(updatedSession);
+      
+      // Update UI state
+      if (thumbnailBase64) {
+        setThumbnails(prev => {
+          const next = [...prev];
+          next[index] = thumbnailBase64;
+          return next;
+        });
+      }
+
       await loadHistory(); // Refresh history list
     } catch (err) {
       console.error("Error persisting incremental clip:", err);
@@ -605,15 +671,14 @@ export default function Home() {
   const loadSession = (session: Session) => {
     // Clear old URLs
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
-    posters.forEach(url => { if (url) URL.revokeObjectURL(url); });
     
-    const newUrls = session.clips.map(c => URL.createObjectURL(c.blob));
-    const newPosterUrls = session.clips.map(c => c.posterBlob ? URL.createObjectURL(c.posterBlob) : null);
+    const newUrls = session.clips.map(c => URL.createObjectURL(new Blob([c.data as any], { type: 'video/mp4' })));
+    const newThumbnails = session.clips.map(c => c.thumbnail || null);
     const newShotNotes = session.clips.map(c => c.shotNote);
     const newFavorites = session.clips.map(c => c.isFavorite || false);
     
     setClips(newUrls);
-    setPosters(newPosterUrls);
+    setThumbnails(newThumbnails);
     setShotNotes(newShotNotes);
     setFavorites(newFavorites);
     setSessionName(session.sessionName || '');
@@ -845,35 +910,7 @@ export default function Home() {
       const impacts = impactTimesRef.current;
       recordingStartTimeRef.current = 0;
 
-      // Announce count safely to prevent cut-offs on Android/mobile
-      window.speechSynthesis.cancel(); // Clear any hung queues
-      const count = impacts.length;
-      
-      const utterance = new SpeechSynthesisUtterance(`${count} shot${count !== 1 ? 's' : ''} detected`);
-      (window as any).__currentUtterance = utterance; // Global ref to prevent GC
-      
-      const voices = voicesRef.current;
-      const preferredVoice = voices.find(v => v.name.includes('Siri') || v.name.includes('Samantha') || v.name.includes('Google US English')) 
-                          || voices.find(v => v.lang.startsWith('en-US')) 
-                          || voices.find(v => v.lang.startsWith('en'));
-      
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
-      }
-      utterance.rate = 0.95; 
-
-      // Create a promise that resolves when the voice FINISHES speaking
-      const speechFinished = new Promise((resolve) => {
-        utterance.onend = () => resolve(true);
-        utterance.onerror = () => resolve(true);
-        // Fallback: if voice hasn't finished in 3 seconds, just proceed anyway
-        setTimeout(() => resolve(true), 3000);
-      });
-      
-      window.speechSynthesis.speak(utterance);
-
-      const fullVideoBlob = new Blob(chunks, { type: mediaRecorder.mimeType });
-      
+      const fullVideoBlob = new Blob(chunks, { type: mediaRecorder.mimeType });      
       try {
         if (impacts.length === 0) {
           alert("No swings detected. Try again and adjust sensitivity.");
@@ -881,24 +918,20 @@ export default function Home() {
           return;
         }
 
-        // Wait for the voice to finish (or timeout) before starting heavy CPU work
-        await speechFinished;
-
-        // Instant UI transition with placeholders
-        setClips(new Array(impacts.length).fill(null));
-        setPosters(new Array(impacts.length).fill(null));
+        // 1. Instant UI transition to gallery with placeholders
         const initialNotes = new Array(impacts.length).fill('');
         const initialFavorites = new Array(impacts.length).fill(false);
+        setClips(new Array(impacts.length).fill(null));
+        setThumbnails(new Array(impacts.length).fill(null));
         setShotNotes(initialNotes);
         setFavorites(initialFavorites);
         setAppState('gallery');
 
-        // 1. Create the session in DB immediately with "empty" slots
-        // This ensures the session exists even if the browser is closed mid-process
+        // 2. Create the session in DB immediately with "empty" slots
         const sessionId = Date.now();
         setCurrentSessionId(sessionId);
         const placeholderClips = initialNotes.map(() => ({
-          blob: new Blob([], { type: 'video/mp4' }), // Temporary empty blob
+          data: new Uint8Array(0),
           shotNote: '',
           isFavorite: false
         }));
@@ -913,28 +946,25 @@ export default function Home() {
         await saveSession(newSession);
         await loadHistory();
 
-        // 2. Process and update one-by-one
+        // 3. Process and update one-by-one (lightning fast now)
         await processSwings(
           fullVideoBlob, 
           impacts, 
           setProgressText,
-          async (index, clipUrl, clipBlob, posterUrl, posterBlob) => {
+          async (index, clipUrl, clipBlob, thumbnail) => {
             setClips(prev => {
               const next = [...prev];
               next[index] = clipUrl;
               return next;
             });
-            if (posterUrl) {
-              setPosters(prev => {
-                const next = [...prev];
-                next[index] = posterUrl;
-                return next;
-              });
-            }
+            
             // Save each clip to DB as soon as it's ready
-            await persistIncrementalClip(sessionId, index, clipBlob, posterBlob);
+            await persistIncrementalClip(sessionId, index, clipBlob, thumbnail);
           }
         );
+
+        // Notify user that processing is complete
+        playLevelCompleteSound();
       } catch (err) {
         console.error("Processing error:", err);
         alert("Error processing video.");
@@ -947,13 +977,19 @@ export default function Home() {
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
+      // Ensure context exists and is resumed during this user gesture for Safari
+      if (!playbackAudioContextRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        playbackAudioContextRef.current = new AudioContextClass();
+      }
+      
+      if (playbackAudioContextRef.current.state === 'suspended') {
+        playbackAudioContextRef.current.resume();
+      }
+
       isRecordingRef.current = false;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      
-      // Immediate UI feedback
-      setAppState('processing');
-      setProgressText('Saving recording...');
     }
   }, [isRecording]);
 
@@ -963,9 +999,8 @@ export default function Home() {
 
   const resetApp = () => {
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
-    posters.forEach(url => { if (url) URL.revokeObjectURL(url); });
     setClips([]);
-    setPosters([]);
+    setThumbnails([]);
     setSelectedClipIndex(null);
     setSessionNotes('');
     setShotNotes([]);
@@ -1041,23 +1076,34 @@ export default function Home() {
     const urlToRemove = newClips[index];
     newClips.splice(index, 1);
     
-    const newPosters = [...posters];
-    const posterToRemove = newPosters[index];
-    newPosters.splice(index, 1);
-    
     const newNotes = [...shotNotes];
     newNotes.splice(index, 1);
+    
+    const newThumbnails = [...thumbnails];
+    newThumbnails.splice(index, 1);
     
     const newFavs = [...favorites];
     newFavs.splice(index, 1);
     
     setClips(newClips);
-    setPosters(newPosters);
     setShotNotes(newNotes);
+    setThumbnails(newThumbnails);
     setFavorites(newFavs);
+
+    // Update selectedClipIndex if we're deleting from within review or before it
+    if (selectedClipIndex !== null) {
+      if (newClips.length === 0) {
+        setSelectedClipIndex(null);
+      } else if (index === selectedClipIndex) {
+        if (index >= newClips.length) {
+          setSelectedClipIndex(newClips.length - 1);
+        }
+      } else if (index < selectedClipIndex) {
+        setSelectedClipIndex(selectedClipIndex - 1);
+      }
+    }
     
     if (urlToRemove) URL.revokeObjectURL(urlToRemove);
-    if (posterToRemove) URL.revokeObjectURL(posterToRemove);
 
     if (currentSessionId !== null) {
       try {
@@ -1154,7 +1200,7 @@ export default function Home() {
             {!isRecording && (
               <div className="mb-8 flex flex-col items-center w-72 bg-black/40 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-2xl pointer-events-auto">
                 <div className="flex justify-between w-full text-[10px] font-bold text-gray-400 mb-3 uppercase tracking-widest">
-                  <span>Audio Sensitivity</span>
+                  <span>Audio Sensitivity Adjustment</span>
                   <div className={`w-2 h-2 rounded-full transition-all duration-300 ${isPreflightTriggered ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-gray-600'}`}></div>
                 </div>
                 
@@ -1249,17 +1295,26 @@ export default function Home() {
                     <button onClick={(e) => deleteHistorySession(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                   </div>
                   {session.sessionNotes && (
-                    <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">"{session.sessionNotes}"</p>
+                    <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">&quot;{session.sessionNotes}&quot;</p>
                   )}
                   <div className="flex gap-2 mt-3 overflow-hidden h-12">
                     {session.clips.slice(0, 5).map((clip, idx) => (
                       <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
-                        <video 
-                          src={URL.createObjectURL(clip.blob)} 
-                          poster={clip.posterBlob ? URL.createObjectURL(clip.posterBlob) : undefined}
-                          className="w-full h-full object-cover" 
-                          preload="metadata" 
-                        />
+                        {clip.thumbnail ? (
+                          <img 
+                            src={clip.thumbnail} 
+                            className="w-full h-full object-cover" 
+                            alt={`Swing ${idx + 1}`}
+                          />
+                        ) : (
+                          <video 
+                            src={`${URL.createObjectURL(new Blob([clip.data as any], { type: 'video/mp4' }))}#t=2`} 
+                            className="w-full h-full object-cover" 
+                            muted 
+                            playsInline 
+                            preload="metadata" 
+                          />
+                        )}
                       </div>
                     ))}
                     {session.clips.length > 5 && (
@@ -1309,14 +1364,21 @@ export default function Home() {
                      <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
                        {clipUrl ? (
                          <>
-                           <video 
-                             src={clipUrl} 
-                             poster={posters[idx] || undefined}
-                             className="w-full h-full object-cover pointer-events-none" 
-                             muted 
-                             playsInline 
-                             preload="metadata" 
-                           />
+                           {thumbnails[idx] ? (
+                             <img 
+                               src={thumbnails[idx] as string} 
+                               className="w-full h-full object-cover pointer-events-none" 
+                               alt={`Swing ${idx + 1}`}
+                             />
+                           ) : (
+                             <video 
+                               src={`${clipUrl}#t=2`}
+                               className="w-full h-full object-cover pointer-events-none" 
+                               muted 
+                               playsInline 
+                               preload="auto" 
+                             />
+                           )}
                            {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
                            <button 
                              onClick={(e) => toggleFavorite(idx, e)}
@@ -1361,7 +1423,6 @@ export default function Home() {
                   ref={mainVideoRef} 
                   key={clips[selectedClipIndex] as string} 
                   src={clips[selectedClipIndex] as string} 
-                  poster={posters[selectedClipIndex] || undefined}
                   autoPlay 
                   loop 
                   playsInline 
@@ -1518,6 +1579,13 @@ export default function Home() {
                   </button>
                   <button onClick={handleFullscreenShare} className="p-2.5 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Share"><Share2 className="w-5 h-5" /></button>
                   <button onClick={handleFullscreenDownload} className="p-2.5 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Download"><Download className="w-5 h-5" /></button>
+                  <button 
+                    onClick={(e) => selectedClipIndex !== null && deleteClip(selectedClipIndex, e)} 
+                    className="p-2.5 bg-gray-800 text-red-400 rounded-full shadow-lg active:scale-90 transition-transform hover:bg-red-900/40" 
+                    title="Delete"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
                   <button onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(null); }} className="p-2.5 bg-gray-800 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Close"><X className="w-5 h-5" /></button>
                 </div>
               </div>
@@ -1526,9 +1594,9 @@ export default function Home() {
               {showNotes && (
                 <div className="absolute inset-x-0 bottom-32 px-6 z-50 animate-in slide-in-from-bottom duration-300">
                   <div className="max-w-xl mx-auto bg-gray-900/90 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl">
-                    <div className="flex items-center gap-2 mb-3 text-blue-400">
+                    <div className="flex items-center gap-2 mb-2 text-blue-400">
                       <FileText className="w-5 h-5" />
-                      <h3 className="font-bold text-sm uppercase tracking-wider">Swing Notes</h3>
+                      <h3 className="font-bold text-sm uppercase tracking-wider">Clip Notes</h3>
                     </div>
                     <textarea 
                       value={shotNotes[selectedClipIndex]} 

@@ -18,8 +18,6 @@ export async function initFFmpeg(onProgress: (msg: string) => void): Promise<FFm
       
       onProgress(isIsolated ? 'Loading video core...' : 'Loading video core (standard mode)...');
       
-      // If we are not cross-origin isolated (Safari on many hosts), 
-      // we MUST NOT provide a workerURL, otherwise load() will hang.
       const loadOptions: any = {
         coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
@@ -53,12 +51,10 @@ export async function processSwings(
   videoBlob: Blob, 
   impacts: number[], 
   onProgress: (progress: string) => void,
-  onClipReady?: (index: number, clipUrl: string, clipBlob: Blob, posterUrl?: string, posterBlob?: Blob) => void
-): Promise<{url: string, blob: Blob, posterUrl?: string, posterBlob?: Blob}[]> {
+  onClipReady?: (index: number, clipUrl: string, clipBlob: Blob, thumbnail?: Uint8Array) => void
+): Promise<{url: string, blob: Blob, thumbnail?: Uint8Array}[]> {
   const fm = await initFFmpeg(onProgress);
   
-  // Refined iOS detection: checking User Agent is more reliable than just blob type.
-  // This prevents Android devices (which often record MP4) from being penalized with slow seeking.
   const isIOS = typeof navigator !== 'undefined' && (
     /iPad|iPhone|iPod/.test(navigator.userAgent) || 
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -75,9 +71,6 @@ export async function processSwings(
 
   if (isIOS) {
     onProgress('Optimizing video for mobile slicing...');
-    // iOS Safari fragmented MP4s are hard to seek. We "fix" them once here
-    // so that we can use lightning-fast input seeking (-ss before -i) for all clips.
-    // Using -c copy is nearly instantaneous as it doesn't re-encode.
     try {
       await fm.exec([
         '-i', inputFileName,
@@ -93,56 +86,83 @@ export async function processSwings(
     }
   }
 
-  const clipResults: {url: string, blob: Blob, posterUrl?: string, posterBlob?: Blob}[] = [];
+  const clipResults: {url: string, blob: Blob, thumbnail?: Uint8Array}[] = [];
   
   for (let i = 0; i < impacts.length; i++) {
     const impactTime = impacts[i];
     const startTime = Math.max(0, impactTime - 2); 
     const duration = 4; 
     const outputFileName = `swing_${i}.mp4`;
-    const posterFileName = `poster_${i}.jpg`;
-    
+    const thumbFileName = `thumb_${i}.jpg`;
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     try {
-      // 1. Combined Pass: Open file ONCE, split stream in memory for two outputs
-      // This is the most memory-efficient way to get a video and a thumbnail.
-      await fm.exec([
-        '-ss', startTime.toString(), 
-        '-i', activeInputFile, 
-        '-t', duration.toString(),
-        '-filter_complex', '[0:v]split=2[v1][v2]',
-        '-map', '[v1]',
-        '-map', '0:a?', 
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-crf', '28',
-        '-g', '5',
-        '-threads', '0',
-        '-movflags', '+faststart',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        outputFileName,
-        '-map', '[v2]',
-        '-vframes', '1',
-        '-f', 'image2',
-        posterFileName
-      ]);
+      if (isIOS) {
+        // iOS: FAST COPY PASS + FAST THUMBNAIL
+        // Since we "fixed" the video above with faststart, we can now use -c copy!
+        await fm.exec([
+          '-ss', startTime.toString(), 
+          '-i', activeInputFile, 
+          '-t', duration.toString(),
+          '-c', 'copy',
+          outputFileName
+        ]);
 
-      const data = await fm.readFile(outputFileName);
-      const safeData = new Uint8Array(data as any);
-      const clipBlob = new Blob([safeData], { type: 'video/mp4' });
-      const url = URL.createObjectURL(clipBlob);
+        const data = await fm.readFile(outputFileName);
+        const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
+        const url = URL.createObjectURL(clipBlob);
 
-      const posterData = await fm.readFile(posterFileName);
-      const safePosterData = new Uint8Array(posterData as any);
-      const posterBlob = new Blob([safePosterData], { type: 'image/jpeg' });
-      const posterUrl = URL.createObjectURL(posterBlob);
+        // Separate pass for thumbnail to ensure stability on iOS
+        await fm.exec([
+          '-ss', (startTime + 2).toString(),
+          '-i', activeInputFile,
+          '-vframes', '1',
+          '-q:v', '4',
+          '-f', 'image2',
+          thumbFileName
+        ]);
 
-      clipResults.push({url, blob: clipBlob, posterUrl, posterBlob});
-      if (onClipReady) onClipReady(i, url, clipBlob, posterUrl, posterBlob);
-      
-      await fm.deleteFile(outputFileName);
-      await fm.deleteFile(posterFileName);
+        const thumbData = await fm.readFile(thumbFileName);
+        const thumbnail = new Uint8Array(thumbData as any);
+        
+        clipResults.push({url, blob: clipBlob, thumbnail});
+        if (onClipReady) onClipReady(i, url, clipBlob, thumbnail);
+        
+        await fm.deleteFile(outputFileName);
+        await fm.deleteFile(thumbFileName);
+      } else {
+        // Android/Desktop: SUPER FAST SINGLE PASS + FAST THUMBNAIL
+        // Use stream copy (-c copy) for the video (near-instant)
+        await fm.exec([
+          '-ss', startTime.toString(), 
+          '-i', activeInputFile, 
+          '-t', duration.toString(), 
+          '-c', 'copy',
+          outputFileName
+        ]);
+
+        const data = await fm.readFile(outputFileName);
+        const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
+        const url = URL.createObjectURL(clipBlob);
+
+        // Fast thumbnail extraction (near-instant)
+        await fm.exec([
+          '-ss', (startTime + 2).toString(),
+          '-i', activeInputFile,
+          '-vframes', '1',
+          '-q:v', '4',
+          '-f', 'image2',
+          thumbFileName
+        ]);
+
+        const thumbData = await fm.readFile(thumbFileName);
+        const thumbnail = new Uint8Array(thumbData as any);
+
+        clipResults.push({url, blob: clipBlob, thumbnail});
+        if (onClipReady) onClipReady(i, url, clipBlob, thumbnail);
+        
+        await fm.deleteFile(outputFileName);
+        await fm.deleteFile(thumbFileName);
+      }
     } catch (err) {
       onProgress(`Error on swing ${i + 1}...`);
     }
