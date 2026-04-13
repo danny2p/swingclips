@@ -1,4 +1,4 @@
-const CACHE_NAME = 'swingclips-cache-v15';
+const CACHE_NAME = 'swingclips-cache-v16';
 const PRE_CACHE = [
   '/',
   '/manifest.json',
@@ -33,6 +33,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   
+  // COMPLETELY IGNORE Next.js internal resources and HMR in development
+  if (url.pathname.startsWith('/_next/') || url.pathname.includes('webpack-hmr')) {
+    return;
+  }
+
   // Custom caching for FFMPEG assets
   if (url.pathname.includes('/ffmpeg/')) {
     event.respondWith(
