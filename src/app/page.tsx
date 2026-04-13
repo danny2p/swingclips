@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
 import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
 import { Session, getAllSessions, saveSession, deleteSession, getSession } from '@/utils/db';
@@ -13,11 +13,239 @@ let dbQueue = Promise.resolve();
 const MAX_RECORDING_MINUTES = 5;
 const MAX_SHOTS = 30;
 
+// High-framerate testing flag (Set to false to revert to standard 30fps logic)
+const USE_HIGH_FRAMERATE = false;
+
+// --- MEMOIZED SUB-COMPONENTS ---
+
+interface GalleryGridProps {
+  clips: (string | null)[];
+  thumbnails: (string | null)[];
+  shotNotes: string[];
+  favorites: boolean[];
+  progressText: string;
+  onSelect: (idx: number) => void;
+  onDelete: (idx: number, e: React.MouseEvent) => void;
+  onShare: (url: string, idx: number) => void;
+  onDownload: (url: string, idx: number) => void;
+  onToggleFavorite: (idx: number, e: React.MouseEvent) => void;
+}
+
+const GalleryGrid = memo(({ 
+  clips, thumbnails, shotNotes, favorites, progressText, 
+  onSelect, onDelete, onShare, onDownload, onToggleFavorite 
+}: GalleryGridProps) => {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+      {clips.map((clipUrl, idx) => (
+        <div key={idx} onClick={() => clipUrl && onSelect(idx)} className={`relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 transition-transform ${clipUrl ? 'cursor-pointer active:scale-95' : 'opacity-70'}`}>
+          <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
+            {clipUrl ? (
+              <>
+                {thumbnails[idx] ? (
+                  <img 
+                    src={thumbnails[idx] as string} 
+                    className="w-full h-full object-cover pointer-events-none" 
+                    alt={`Swing ${idx + 1}`}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center text-center p-4">
+                    <Loader2 className="w-6 h-6 animate-spin text-blue-500/30 mb-2" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-700">Loading...</span>
+                  </div>
+                )}
+                {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
+                <button 
+                  onClick={(e) => onToggleFavorite(idx, e)}
+                  className="absolute top-2 left-2 p-1.5 bg-black/40 hover:bg-black/60 rounded-full backdrop-blur-md transition-all shadow-lg z-10"
+                >
+                  <Star className={`w-4 h-4 ${favorites[idx] ? 'fill-white text-white' : 'text-white'}`} />
+                </button>
+              </>
+            ) : (
+              <div className="flex flex-col items-center text-center p-4">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-500/50 mb-2" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600">Slicing...</span>
+              </div>
+            )}
+          </div>
+          <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
+            <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
+            {clipUrl && (
+              <div className="flex gap-2">
+                <button onClick={(e) => onDelete(idx, e)} className="p-1.5 bg-gray-800 hover:bg-red-900/50 rounded-md text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); onShare(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"><Share2 className="w-4 h-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); onDownload(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"><Download className="w-4 h-4" /></button>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+});
+GalleryGrid.displayName = 'GalleryGrid';
+
+interface HistoryListProps {
+  sessions: Session[];
+  currentSessionId: number | null;
+  onLoad: (session: Session) => void;
+  onDelete: (e: React.MouseEvent, id: number) => void;
+}
+
+const HistoryList = memo(({ sessions, currentSessionId, onLoad, onDelete }: HistoryListProps) => {
+  return (
+    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      {sessions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+          <History className="w-12 h-12 mb-4 opacity-20" />
+          <p>No saved sessions yet.</p>
+        </div>
+      ) : (
+        sessions.map((session) => (
+          <div key={session.id} onClick={() => onLoad(session)} className="bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg cursor-pointer hover:border-blue-500/50 transition-all active:scale-[0.98]">
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <h3 className="font-bold text-white">{session.sessionName || new Date(session.id).toLocaleDateString()}</h3>
+                <p className="text-xs text-gray-500">{session.sessionName ? new Date(session.id).toLocaleDateString() + ' • ' : ''}{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
+              </div>
+              <button onClick={(e) => onDelete(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+            </div>
+            {session.sessionNotes && (
+              <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">&quot;{session.sessionNotes}&quot;</p>
+            )}
+            <div className="flex gap-2 mt-3 overflow-hidden h-12">
+              {session.clips.slice(0, 5).map((clip, idx) => (
+                <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
+                  {clip.thumbnail ? (
+                    <img 
+                      src={clip.thumbnail} 
+                      className="w-full h-full object-cover" 
+                      alt={`Swing ${idx + 1}`}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                      <Video className="w-4 h-4 text-gray-600" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {session.clips.length > 5 && (
+                <div className="h-full aspect-square bg-gray-800 rounded flex items-center justify-center text-[10px] font-bold text-gray-500">+{session.clips.length - 5}</div>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+});
+HistoryList.displayName = 'HistoryList';
+
+interface VideoControlsProps {
+  currentTime: number;
+  duration: number;
+  isPlaying: boolean;
+  playbackRate: number;
+  onTogglePlay: () => void;
+  onTogglePlaybackRate: () => void;
+  onStartStep: (multiplier: number) => void;
+  onStopStep: () => void;
+  onScrub: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onScrubStart: () => void;
+  onScrubEnd: () => void;
+  formatSeconds: (s: number) => string;
+}
+
+const VideoControls = memo(({
+  currentTime, duration, isPlaying, playbackRate,
+  onTogglePlay, onTogglePlaybackRate, onStartStep, onStopStep,
+  onScrub, onScrubStart, onScrubEnd, formatSeconds
+}: VideoControlsProps) => {
+  return (
+    <div className="absolute bottom-10 inset-x-0 z-40 px-6 pointer-events-none">
+      <div className="max-w-3xl mx-auto w-full flex flex-col gap-3 pointer-events-auto bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 shadow-2xl">
+        {/* Row 1: Controls */}
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center gap-4">
+            <button 
+              onPointerDown={() => onStartStep(-1/60)}
+              onPointerUp={onStopStep}
+              onPointerLeave={onStopStep}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
+              title="Previous Frame"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            
+            <button 
+              onClick={onTogglePlay} 
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
+            >
+              {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
+            </button>
+
+            <button 
+              onPointerDown={() => onStartStep(1/60)}
+              onPointerUp={onStopStep}
+              onPointerLeave={onStopStep}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
+              title="Next Frame"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+
+          <button 
+            onClick={onTogglePlaybackRate} 
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all active:scale-90 border ml-8 ${playbackRate === 0.25 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white/50 border-white/10 text-gray-300'}`}
+          >
+            <Gauge className="w-4 h-4" />
+            <span className="text-xs font-bold">{playbackRate === 1 ? '1x' : '0.25x'}</span>
+          </button>
+        </div>
+
+        {/* Row 2: Progress */}
+        <div className="w-full flex items-center gap-3">
+          <div className="flex-1 flex items-center group relative h-6">
+            <input 
+              type="range"
+              min="0"
+              max={duration || 0}
+              step="0.001"
+              value={currentTime}
+              onChange={onScrub}
+              onMouseDown={onScrubStart}
+              onMouseUp={onScrubEnd}
+              onTouchStart={onScrubStart}
+              onTouchEnd={onScrubEnd}
+              className="w-full h-1.5 bg-gray-600 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all focus:outline-none"
+            />
+            {/* Custom Progress Bar background to show "filled" portion */}
+            <div 
+              className="absolute left-0 top-[10px] h-1.5 bg-blue-500 rounded-full pointer-events-none"
+              style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+            />
+          </div>
+          
+          <span className="text-[10px] font-mono text-gray-300 w-16 text-right">
+            {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+});
+VideoControls.displayName = 'VideoControls';
+
+// --- MAIN COMPONENT ---
+
 export default function Home() {
   // App states: 'camera' | 'processing' | 'gallery' | 'history'
   const [appState, setAppState] = useState<'camera' | 'processing' | 'gallery' | 'history'>('camera');
   const [showIntro, setShowIntro] = useState<boolean>(true);
   const [recordingTime, setRecordingTime] = useState(0); // Seconds elapsed
+  const frameRateRef = useRef(30); // Default to 30fps
 
   // Persisted voices for Speech Synthesis
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
@@ -773,8 +1001,18 @@ export default function Home() {
     try {
       const constraints: MediaStreamConstraints = {
         video: selectedDeviceId 
-          ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          ? { 
+              deviceId: { exact: selectedDeviceId }, 
+              width: { ideal: 1280 }, 
+              height: { ideal: 720 },
+              frameRate: USE_HIGH_FRAMERATE ? { ideal: 60 } : { ideal: 30 }
+            }
+          : { 
+              facingMode: 'environment', 
+              width: { ideal: 1280 }, 
+              height: { ideal: 720 },
+              frameRate: USE_HIGH_FRAMERATE ? { ideal: 60 } : { ideal: 30 }
+            },
         audio: true
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -786,6 +1024,16 @@ export default function Home() {
       setZoomLevel(1);
       
       const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings();
+      
+      // Detect actual achieved frame rate
+      if (settings.frameRate) {
+        frameRateRef.current = settings.frameRate;
+        console.log(`Camera active: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
+      } else {
+        frameRateRef.current = 30; // Fallback
+      }
+
       const capabilities = track.getCapabilities && track.getCapabilities() as any;
       if (capabilities && capabilities.zoom) {
         setMaxZoom(capabilities.zoom.max);
@@ -1384,49 +1632,12 @@ export default function Home() {
                <div><h1 className="text-lg font-bold text-white">History</h1><p className="text-xs text-gray-400">{sessions.length} sessions saved</p></div>
              </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {sessions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-                <History className="w-12 h-12 mb-4 opacity-20" />
-                <p>No saved sessions yet.</p>
-              </div>
-            ) : (
-              sessions.map((session) => (
-                <div key={session.id} onClick={() => loadSession(session)} className="bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg cursor-pointer hover:border-blue-500/50 transition-all active:scale-[0.98]">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-bold text-white">{session.sessionName || new Date(session.id).toLocaleDateString()}</h3>
-                      <p className="text-xs text-gray-500">{session.sessionName ? new Date(session.id).toLocaleDateString() + ' • ' : ''}{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
-                    </div>
-                    <button onClick={(e) => deleteHistorySession(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                  {session.sessionNotes && (
-                    <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">&quot;{session.sessionNotes}&quot;</p>
-                  )}
-                  <div className="flex gap-2 mt-3 overflow-hidden h-12">
-                    {session.clips.slice(0, 5).map((clip, idx) => (
-                      <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
-                        {clip.thumbnail ? (
-                          <img 
-                            src={clip.thumbnail} 
-                            className="w-full h-full object-cover" 
-                            alt={`Swing ${idx + 1}`}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-gray-800">
-                            <Video className="w-4 h-4 text-gray-600" />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {session.clips.length > 5 && (
-                      <div className="h-full aspect-square bg-gray-800 rounded flex items-center justify-center text-[10px] font-bold text-gray-500">+{session.clips.length - 5}</div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          <HistoryList 
+            sessions={sessions} 
+            currentSessionId={currentSessionId} 
+            onLoad={loadSession} 
+            onDelete={deleteHistorySession} 
+          />
         </div>
       )}
 
@@ -1460,52 +1671,19 @@ export default function Home() {
                     <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[45px]" />
                  </div>
                </div>
-               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                 {clips.map((clipUrl, idx) => (
-                   <div key={idx} onClick={() => clipUrl && setSelectedClipIndex(idx)} className={`relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 transition-transform ${clipUrl ? 'cursor-pointer active:scale-95' : 'opacity-70'}`}>
-                     <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
-                       {clipUrl ? (
-                         <>
-                           {thumbnails[idx] ? (
-                             <img 
-                               src={thumbnails[idx] as string} 
-                               className="w-full h-full object-cover pointer-events-none" 
-                               alt={`Swing ${idx + 1}`}
-                             />
-                           ) : (
-                             <div className="flex flex-col items-center text-center p-4">
-                               <Loader2 className="w-6 h-6 animate-spin text-blue-500/30 mb-2" />
-                               <span className="text-[10px] font-bold uppercase tracking-wider text-gray-700">Loading...</span>
-                             </div>
-                           )}
-                           {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
-                           <button 
-                             onClick={(e) => toggleFavorite(idx, e)}
-                             className="absolute top-2 left-2 p-1.5 bg-black/40 hover:bg-black/60 rounded-full backdrop-blur-md transition-all shadow-lg z-10"
-                           >
-                             <Star className={`w-4 h-4 ${favorites[idx] ? 'fill-white text-white' : 'text-white'}`} />
-                           </button>
-                         </>
-                       ) : (
-                         <div className="flex flex-col items-center text-center p-4">
-                           <Loader2 className="w-8 h-8 animate-spin text-blue-500/50 mb-2" />
-                           <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600">Slicing...</span>
-                         </div>
-                       )}
-                     </div>
-                     <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
-                       <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
-                       {clipUrl && (
-                         <div className="flex gap-2">
-                           <button onClick={(e) => deleteClip(idx, e)} className="p-1.5 bg-gray-800 hover:bg-red-900/50 rounded-md text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
-                           <button onClick={(e) => { e.stopPropagation(); shareClip(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"><Share2 className="w-4 h-4" /></button>
-                           <button onClick={(e) => { e.stopPropagation(); downloadClip(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"><Download className="w-4 h-4" /></button>
-                         </div>
-                       )}
-                     </div>
-                   </div>
-                 ))}
-               </div>             </div>
+               <GalleryGrid 
+                 clips={clips}
+                 thumbnails={thumbnails}
+                 shotNotes={shotNotes}
+                 favorites={favorites}
+                 progressText={progressText}
+                 onSelect={setSelectedClipIndex}
+                 onDelete={deleteClip}
+                 onShare={shareClip}
+                 onDownload={downloadClip}
+                 onToggleFavorite={toggleFavorite}
+               />
+             </div>
           </div>
 
           {selectedClipIndex !== null && (
@@ -1549,77 +1727,20 @@ export default function Home() {
                 />
 
                 {/* Custom Video Controls */}
-                <div className="absolute bottom-10 inset-x-0 z-40 px-6 pointer-events-none">
-                  <div className="max-w-3xl mx-auto w-full flex flex-col gap-3 pointer-events-auto bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 shadow-2xl">
-                    {/* Row 1: Controls */}
-                    <div className="flex items-center justify-between w-full">
-                      <div className="flex items-center gap-4">
-                        <button 
-                          onPointerDown={() => startContinuousStep(-1/60)}
-                          onPointerUp={stopContinuousStep}
-                          onPointerLeave={stopContinuousStep}
-                          className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
-                          title="Previous Frame"
-                        >
-                          <ChevronLeft className="w-5 h-5" />
-                        </button>
-                        
-                        <button 
-                          onClick={togglePlay} 
-                          className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
-                        >
-                          {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
-                        </button>
-
-                        <button 
-                          onPointerDown={() => startContinuousStep(1/60)}
-                          onPointerUp={stopContinuousStep}
-                          onPointerLeave={stopContinuousStep}
-                          className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
-                          title="Next Frame"
-                        >
-                          <ChevronRight className="w-5 h-5" />
-                        </button>
-                      </div>
-
-                      <button 
-                        onClick={togglePlaybackRate} 
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all active:scale-90 border ml-8 ${playbackRate === 0.25 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white/50 border-white/10 text-gray-300'}`}
-                      >
-                        <Gauge className="w-4 h-4" />
-                        <span className="text-xs font-bold">{playbackRate === 1 ? '1x' : '0.25x'}</span>
-                      </button>
-                    </div>
-
-                    {/* Row 2: Progress */}
-                    <div className="w-full flex items-center gap-3">
-                      <div className="flex-1 flex items-center group relative h-6">
-                        <input 
-                          type="range"
-                          min="0"
-                          max={duration || 0}
-                          step="0.001"
-                          value={currentTime}
-                          onChange={handleScrub}
-                          onMouseDown={handleScrubStart}
-                          onMouseUp={handleScrubEnd}
-                          onTouchStart={handleScrubStart}
-                          onTouchEnd={handleScrubEnd}
-                          className="w-full h-1.5 bg-gray-600 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all focus:outline-none"
-                        />
-                        {/* Custom Progress Bar background to show "filled" portion */}
-                        <div 
-                          className="absolute left-0 top-[10px] h-1.5 bg-blue-500 rounded-full pointer-events-none"
-                          style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                        />
-                      </div>
-                      
-                      <span className="text-[10px] font-mono text-gray-300 w-16 text-right">
-                        {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                <VideoControls 
+                  currentTime={currentTime}
+                  duration={duration}
+                  isPlaying={isPlaying}
+                  playbackRate={playbackRate}
+                  onTogglePlay={togglePlay}
+                  onTogglePlaybackRate={togglePlaybackRate}
+                  onStartStep={startContinuousStep}
+                  onStopStep={stopContinuousStep}
+                  onScrub={handleScrub}
+                  onScrubStart={handleScrubStart}
+                  onScrubEnd={handleScrubEnd}
+                  formatSeconds={(s) => s.toFixed(2)}
+                />
 
                 <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 flex items-center justify-between pointer-events-none z-40">
                   <button disabled={selectedClipIndex === 0} onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(selectedClipIndex - 1); }} className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === 0 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}><ChevronLeft className="w-8 h-8" /></button>
