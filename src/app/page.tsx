@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
-import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
+import { processSwings, burnLinesToVideo, reencodeClipForSeeking, resetFFmpeg } from '@/utils/videoProcessor';
 import { Session, getAllSessions, saveSession, deleteSession, getSession } from '@/utils/db';
 import JSZip from 'jszip';
 
@@ -23,6 +23,7 @@ interface GalleryGridProps {
   thumbnails: (string | null)[];
   shotNotes: string[];
   favorites: boolean[];
+  clipByteSizes: (number | null)[];
   progressText: string;
   onSelect: (idx: number) => void;
   onDelete: (idx: number, e: React.MouseEvent) => void;
@@ -31,9 +32,9 @@ interface GalleryGridProps {
   onToggleFavorite: (idx: number, e: React.MouseEvent) => void;
 }
 
-const GalleryGrid = memo(({ 
-  clips, thumbnails, shotNotes, favorites, progressText, 
-  onSelect, onDelete, onShare, onDownload, onToggleFavorite 
+const GalleryGrid = memo(({
+  clips, thumbnails, shotNotes, favorites, clipByteSizes, progressText,
+  onSelect, onDelete, onShare, onDownload, onToggleFavorite
 }: GalleryGridProps) => {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
@@ -55,7 +56,16 @@ const GalleryGrid = memo(({
                   </div>
                 )}
                 {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
-                <button 
+                {clipByteSizes[idx] != null && (
+                  <div className="absolute bottom-2 left-2 z-10">
+                    <span className="bg-black/70 text-gray-300 text-[9px] font-mono px-1.5 py-0.5 rounded-full backdrop-blur-sm">
+                      {clipByteSizes[idx]! < 1024 * 1024
+                        ? `${Math.round(clipByteSizes[idx]! / 1024)}KB`
+                        : `${(clipByteSizes[idx]! / (1024 * 1024)).toFixed(1)}MB`}
+                    </span>
+                  </div>
+                )}
+                <button
                   onClick={(e) => onToggleFavorite(idx, e)}
                   className="absolute top-2 left-2 p-1.5 bg-black/40 hover:bg-black/60 rounded-full backdrop-blur-md transition-all shadow-lg z-10"
                 >
@@ -451,6 +461,13 @@ export default function Home() {
   const [shotNotes, setShotNotes] = useState<string[]>([]);
   const [showNotes, setShowNotes] = useState(false);
   const [favorites, setFavorites] = useState<boolean[]>([]);
+  const [clipOptimized, setClipOptimized] = useState<boolean[]>([]);
+  const [clipByteSizes, setClipByteSizes] = useState<(number | null)[]>([]);
+  const [reencodeQueueSize, setReencodeQueueSize] = useState(0);
+  const [lastSeekMs, setLastSeekMs] = useState<number | null>(null);
+  const [holdStepCount, setHoldStepCount] = useState(0);
+  const isAndroidDevice = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+  const holdStepCountRef = useRef(0);
 
   // Recording Timer & Limits
   useEffect(() => {
@@ -644,6 +661,10 @@ export default function Home() {
   const stepFrameRequestRef = useRef<number | null>(null);
   const stepDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const continuousStepActiveRef = useRef(false);
+  const isSteppingRef = useRef(false);
+  const reencodeActiveRef = useRef(false);
+  const reencodeQueueRef = useRef<Set<number>>(new Set());
+  const selectedClipIndexRef = useRef<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -669,6 +690,91 @@ export default function Home() {
     }
   };
 
+  // Re-encodes clips in the background with dense keyframes (-g 5) for smooth
+  // Android seeking. Processes one clip at a time. The currently-viewed clip is
+  // always prioritised so opening any clip jumps it to the front of the queue.
+  // clipUrls is a mutable array — processed entries are updated in place so the
+  // function can be called from both new-session and load-session paths.
+  const startReencodeQueue = (sessionId: number, clipUrls: (string | null)[]) => {
+    return; // TEST: skip re-encode to verify RVFC stepping works on stream-copy clips
+    reencodeActiveRef.current = false; // cancel any existing queue first
+    reencodeQueueRef.current = new Set(
+      clipUrls.map((url, i) => url ? i : -1).filter(i => i >= 0)
+    );
+    if (reencodeQueueRef.current.size === 0) return;
+    reencodeActiveRef.current = true;
+    setReencodeQueueSize(reencodeQueueRef.current.size);
+
+    (async () => {
+      // Reset FFmpeg to flush WASM heap accumulated during processSwings.
+      // Without this, memory pressure from the session video causes libx264
+      // to fail or degrade silently for clips after the first one.
+      await resetFFmpeg();
+
+      while (reencodeActiveRef.current && reencodeQueueRef.current.size > 0) {
+        const viewed = selectedClipIndexRef.current;
+        const nextIndex =
+          viewed !== null && reencodeQueueRef.current.has(viewed)
+            ? viewed
+            : Math.min(...reencodeQueueRef.current);
+
+        reencodeQueueRef.current.delete(nextIndex);
+        const oldUrl = clipUrls[nextIndex];
+        if (!oldUrl) continue;
+
+        try {
+          const response = await fetch(oldUrl);
+          const inputBlob = await response.blob();
+          if (!reencodeActiveRef.current) break;
+
+          const reencoded = await reencodeClipForSeeking(inputBlob);
+          if (!reencodeActiveRef.current) break;
+
+          const newUrl = URL.createObjectURL(reencoded);
+          URL.revokeObjectURL(oldUrl);
+          clipUrls[nextIndex] = newUrl;
+
+          setClips(prev => {
+            const next = [...prev];
+            next[nextIndex] = newUrl;
+            return next;
+          });
+
+          setClipOptimized(prev => {
+            const next = [...prev];
+            next[nextIndex] = true;
+            return next;
+          });
+
+          setClipByteSizes(prev => {
+            const next = [...prev];
+            next[nextIndex] = reencoded.size;
+            return next;
+          });
+          setReencodeQueueSize(prev => Math.max(0, prev - 1));
+
+          const idx = nextIndex;
+          dbQueue = dbQueue.then(async () => {
+            try {
+              const session = await getSession(sessionId);
+              if (!session) return;
+              const arr = await reencoded.arrayBuffer();
+              const updatedClips = [...session.clips];
+              updatedClips[idx] = { ...updatedClips[idx], data: new Uint8Array(arr), optimized: true };
+              await saveSession({ ...session, clips: updatedClips });
+            } catch (e) {
+              console.warn(`Re-encode DB update failed for clip ${idx}:`, e);
+            }
+          });
+        } catch (e) {
+          console.warn(`Re-encode failed for clip ${nextIndex}:`, e);
+        }
+      }
+      reencodeActiveRef.current = false;
+      setReencodeQueueSize(0);
+    })();
+  };
+
   const stepFrame = (delta: number) => {
     if (mainVideoRef.current) {
       const video = mainVideoRef.current;
@@ -677,17 +783,46 @@ export default function Home() {
       video.currentTime = newTime;
       setCurrentTime(newTime);
       playTickSound();
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(5);
-      }
     }
   };
 
   const startContinuousStep = (direction: number) => {
     const delta = direction / frameRateRef.current;
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const hasRVFC = typeof (mainVideoRef.current as any)?.requestVideoFrameCallback === 'function';
+
+    // Advance one frame using requestVideoFrameCallback — no currentTime seek,
+    // so the MediaCodec decoder pipeline is never flushed. Completes in ~16-33ms
+    // regardless of decoder warmup state. Forward only; backward must still seek.
+    const stepViaRVFC = (video: HTMLVideoElement): Promise<void> => {
+      if (video.ended || video.currentTime >= video.duration - 0.05) return Promise.resolve();
+      const startMediaTime = video.currentTime;
+      isSteppingRef.current = true;
+      return new Promise<void>(resolve => {
+        video.play().catch(() => {});
+        const cb = (_: number, meta: { mediaTime: number }) => {
+          if (meta.mediaTime > startMediaTime + 0.005) {
+            video.pause();
+            isSteppingRef.current = false;
+            setCurrentTime(video.currentTime);
+            resolve();
+          } else {
+            (video as any).requestVideoFrameCallback(cb);
+          }
+        };
+        (video as any).requestVideoFrameCallback(cb);
+      });
+    };
 
     // 1. Step once immediately (The Tap)
-    stepFrame(delta);
+    holdStepCountRef.current = 0;
+    setHoldStepCount(0);
+    if (isAndroid && delta > 0 && hasRVFC) {
+      playTickSound();
+      stepViaRVFC(mainVideoRef.current!); // fire-and-forget; resolves in ~33ms
+    } else {
+      stepFrame(delta);
+    }
 
     // 2. Clear any existing state
     continuousStepActiveRef.current = false;
@@ -696,39 +831,69 @@ export default function Home() {
 
     // 3. Hold loop — platform-specific to handle decoder differences:
     //
-    // Android: seeked-event-driven so seeks never queue up (queuing causes the
-    //   "freeze then jump on release" bug). A 100ms minimum between steps caps
-    //   the rate at 10fps; if a seek takes longer we advance as fast as we can.
-    //
-    // Mac/iOS: time-based rAF loop at exactly 10fps. Seeks are instant so we
-    //   need the cap to prevent the button from flying through the clip.
+    // Android forward: RVFC-driven. The browser naturally advances the decoder
+    //   one frame per step — no flush, no cold-start penalty.
+    // Android backward: seeked-event-driven (RVFC can't go backward).
+    // Mac/iOS: time-based rAF loop at exactly 10fps.
     stepDelayTimeoutRef.current = setTimeout(() => {
       if (!mainVideoRef.current) return;
       continuousStepActiveRef.current = true;
 
-      const STEP_INTERVAL_MS = 100; // 10fps cap
+      const HOLD_STEP_FPS = 8; // Max frame-step rate while holding
+      const STEP_INTERVAL_MS = Math.round(1000 / HOLD_STEP_FPS);
 
-      if (/Android/i.test(navigator.userAgent)) {
-        const runAndroidLoop = async () => {
+      if (isAndroid && delta > 0 && hasRVFC) {
+        const runRVFCLoop = async () => {
+          while (continuousStepActiveRef.current && mainVideoRef.current) {
+            const video = mainVideoRef.current;
+            if (video.ended || video.currentTime >= video.duration - 0.05) break;
+
+            // Fire the tick at the top of the iteration so the audio metronome
+            // is driven by the loop clock, not by RVFC resolution time.
+            playTickSound();
+            holdStepCountRef.current += 1;
+            setHoldStepCount(holdStepCountRef.current);
+
+            const stepStart = performance.now();
+            await stepViaRVFC(video);
+            const elapsed = performance.now() - stepStart;
+
+            setLastSeekMs(Math.round(elapsed));
+
+            // Hard floor: never start the next step sooner than STEP_INTERVAL_MS
+            // from when this one started.
+            if (elapsed < STEP_INTERVAL_MS) {
+              await new Promise<void>(resolve => setTimeout(resolve, STEP_INTERVAL_MS - elapsed));
+            }
+
+            if (!continuousStepActiveRef.current) return;
+          }
+        };
+        runRVFCLoop();
+      } else if (isAndroid) {
+        // Backward on Android: seeked-event-driven (no RVFC for reverse)
+        const runSeekLoop = async () => {
           while (continuousStepActiveRef.current && mainVideoRef.current) {
             const stepStart = performance.now();
             stepFrame(delta);
 
-            // Wait for the seek to finish before queuing the next one
             await new Promise<void>(resolve => {
-              mainVideoRef.current!.addEventListener('seeked', resolve, { once: true });
+              mainVideoRef.current!.addEventListener('seeked', () => resolve(), { once: true });
             });
+
+            setLastSeekMs(Math.round(performance.now() - stepStart));
+            holdStepCountRef.current += 1;
+            setHoldStepCount(holdStepCountRef.current);
 
             if (!continuousStepActiveRef.current) return;
 
-            // Pad to 100ms minimum so we never exceed 10fps even if seek was fast
             const elapsed = performance.now() - stepStart;
             if (elapsed < STEP_INTERVAL_MS) {
               await new Promise<void>(resolve => setTimeout(resolve, STEP_INTERVAL_MS - elapsed));
             }
           }
         };
-        runAndroidLoop();
+        runSeekLoop();
       } else {
         // Mac / iOS: time-based rAF, track targetTime independently of seek speed
         let targetTime = mainVideoRef.current.currentTime;
@@ -744,9 +909,6 @@ export default function Home() {
             mainVideoRef.current.currentTime = targetTime;
             setCurrentTime(targetTime);
             playTickSound();
-            if (typeof navigator !== 'undefined' && navigator.vibrate) {
-              navigator.vibrate(5);
-            }
           }
 
           stepFrameRequestRef.current = requestAnimationFrame(loop);
@@ -759,6 +921,9 @@ export default function Home() {
 
   const stopContinuousStep = () => {
     continuousStepActiveRef.current = false;
+    isSteppingRef.current = false;
+    // Pause immediately in case an RVFC play() is still in flight
+    if (mainVideoRef.current) mainVideoRef.current.pause();
     if (stepDelayTimeoutRef.current) {
       clearTimeout(stepDelayTimeoutRef.current);
       stepDelayTimeoutRef.current = null;
@@ -787,6 +952,7 @@ export default function Home() {
     if (mainVideoRef.current) {
       setDuration(mainVideoRef.current.duration);
     }
+    setLastSeekMs(null); // clear timing from previous clip
   };
 
   const handleScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -813,6 +979,7 @@ export default function Home() {
   };
 
   useEffect(() => {
+    selectedClipIndexRef.current = selectedClipIndex;
     if (selectedClipIndex !== null) {
       setIsPlaying(true);
       setCurrentTime(0);
@@ -1026,20 +1193,35 @@ export default function Home() {
   const loadSession = (session: Session) => {
     // Clear old URLs
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
-    
+
     const newUrls = session.clips.map(c => URL.createObjectURL(new Blob([c.data as any], { type: 'video/mp4' })));
     const newThumbnails = session.clips.map(c => c.thumbnail || null);
     const newShotNotes = session.clips.map(c => c.shotNote);
     const newFavorites = session.clips.map(c => c.isFavorite || false);
-    
+    const newOptimized = session.clips.map(c => c.optimized || false);
+
     setClips(newUrls);
     setThumbnails(newThumbnails);
     setShotNotes(newShotNotes);
     setFavorites(newFavorites);
+    setClipOptimized(newOptimized);
+    setClipByteSizes(session.clips.map(c => c.data.byteLength > 0 ? c.data.byteLength : null));
+    setReencodeQueueSize(0);
     setSessionName(session.sessionName || '');
     setSessionNotes(session.sessionNotes);
     setCurrentSessionId(session.id);
     setAppState('gallery');
+
+    // On Android, re-encode any clips that weren't optimized before the app was closed.
+    // Pass nulls for already-optimized clips so the queue skips them.
+    if (/Android/i.test(navigator.userAgent)) {
+      const pendingUrls: (string | null)[] = session.clips.map((c, i) =>
+        c.optimized ? null : newUrls[i]
+      );
+      if (pendingUrls.some(u => u !== null)) {
+        setTimeout(() => startReencodeQueue(session.id, pendingUrls), 1000);
+      }
+    }
   };
 
   const deleteHistorySession = async (e: React.MouseEvent, id: number) => {
@@ -1112,6 +1294,8 @@ export default function Home() {
   }, [selectedDeviceId]);
 
   useEffect(() => {
+    // Cancel any in-progress background re-encode when leaving the gallery
+    if (appState !== 'gallery') reencodeActiveRef.current = false;
     if (appState === 'camera' && showIntro === false) startCamera();
     return () => {
       if (streamRef.current) {
@@ -1300,6 +1484,9 @@ export default function Home() {
         setThumbnails(new Array(impacts.length).fill(null));
         setShotNotes(initialNotes);
         setFavorites(initialFavorites);
+        setClipOptimized(new Array(impacts.length).fill(false));
+        setClipByteSizes(new Array(impacts.length).fill(null));
+        setReencodeQueueSize(0);
         setAppState('gallery');
 
         // 2. Create the session in DB immediately with "empty" slots
@@ -1322,11 +1509,13 @@ export default function Home() {
         await loadHistory();
 
         // 3. Process and update one-by-one (lightning fast now)
+        const processedUrls: (string | null)[] = new Array(impacts.length).fill(null);
         await processSwings(
-          fullVideoBlob, 
-          impacts, 
+          fullVideoBlob,
+          impacts,
           setProgressText,
           async (index, clipUrl, clipBlob, thumbnail) => {
+            processedUrls[index] = clipUrl;
             setClips(prev => {
               const next = [...prev];
               next[index] = clipUrl;
@@ -1343,7 +1532,7 @@ export default function Home() {
                 return next;
               });
             }
-            
+
             // Save each clip to DB as soon as it's ready
             await persistIncrementalClip(sessionId, index, clipBlob, thumbnail);
           }
@@ -1351,6 +1540,12 @@ export default function Home() {
 
         // Notify user that processing is complete
         playLevelCompleteSound();
+
+        // On Android, kick off a background queue to re-encode clips with dense
+        // keyframes so frame-by-frame seeking is smooth.
+        if (/Android/i.test(navigator.userAgent)) {
+          setTimeout(() => startReencodeQueue(sessionId, processedUrls), 2000);
+        }
       } catch (err) {
         console.error("Processing error:", err);
         alert("Error processing video.");
@@ -1731,11 +1926,12 @@ export default function Home() {
                     <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[45px]" />
                  </div>
                </div>
-               <GalleryGrid 
+               <GalleryGrid
                  clips={clips}
                  thumbnails={thumbnails}
                  shotNotes={shotNotes}
                  favorites={favorites}
+                 clipByteSizes={clipByteSizes}
                  progressText={progressText}
                  onSelect={setSelectedClipIndex}
                  onDelete={deleteClip}
@@ -1765,8 +1961,8 @@ export default function Home() {
                   playsInline 
                   onTimeUpdate={handleTimeUpdate}
                   onLoadedMetadata={handleLoadedMetadata}
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => setIsPlaying(false)}
+                  onPlay={() => { if (!isSteppingRef.current) setIsPlaying(true); }}
+                  onPause={() => { if (!isSteppingRef.current) setIsPlaying(false); }}
                   className="w-full h-full object-cover absolute inset-0 z-0" 
                 />
                 
@@ -1811,7 +2007,16 @@ export default function Home() {
               {/* Header Overlay */}
               <div className="px-4 py-4 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent absolute top-0 inset-x-0 z-50 pointer-events-none">
                 <div className="flex flex-col text-white pointer-events-auto">
-                  <h2 className="text-base font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
+                    {clipByteSizes[selectedClipIndex] != null && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-black/60 text-gray-300">
+                        {clipByteSizes[selectedClipIndex]! < 1024 * 1024
+                          ? `${Math.round(clipByteSizes[selectedClipIndex]! / 1024)}KB`
+                          : `${(clipByteSizes[selectedClipIndex]! / (1024 * 1024)).toFixed(1)}MB`}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex gap-1.5 mt-1">
                     <button 
                       onClick={() => setDrawMode(drawMode === 'line' ? 'circle' : 'line')} 

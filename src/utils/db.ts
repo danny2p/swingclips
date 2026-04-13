@@ -8,6 +8,7 @@ export interface SwingClip {
   thumbnail?: string; // Base64 image string for stable thumbnails
   shotNote: string;
   isFavorite?: boolean;
+  optimized?: boolean; // true once re-encoded with dense keyframes for smooth Android seeking
 }
 
 export interface Session {

@@ -215,6 +215,33 @@ export async function processSwings(
   return [];
 }
 
+// Re-encodes a clip with dense keyframes (-g 5) so Android's hardware decoder
+// can seek to any frame by decoding at most 4 P-frames rather than up to ~90.
+// Uses the existing FFmpeg singleton — call this only when processing is idle.
+export async function reencodeClipForSeeking(inputBlob: Blob): Promise<Blob> {
+  const fm = await initFFmpeg(() => {});
+  const inputFile = 'input_reenc.mp4';
+  const outputFile = 'output_reenc.mp4';
+
+  const arrayBuffer = await inputBlob.arrayBuffer();
+  await fm.writeFile(inputFile, new Uint8Array(arrayBuffer));
+
+  await fm.exec([
+    '-y',
+    '-i', inputFile,
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '5', '-c:a', 'copy',
+    outputFile
+  ]);
+
+  const data = await fm.readFile(outputFile);
+  const blob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
+
+  await fm.deleteFile(inputFile);
+  await fm.deleteFile(outputFile);
+
+  return blob;
+}
+
 export async function burnLinesToVideo(
   videoBlob: Blob,
   imageBlob: Blob,
