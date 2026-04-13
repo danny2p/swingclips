@@ -1626,12 +1626,20 @@ export default function Home() {
             <br /><br />
             <span className="text-blue-400 font-semibold">Shots are detected by impact sound</span>, so this works best in an indoor or isolated setting.
           </p>
-          <button 
+          <button
             onClick={dismissIntro}
             className="w-full py-4 bg-white text-black font-bold text-lg rounded-xl shadow-lg active:scale-95 transition-transform"
           >
             Get Started
           </button>
+          {sessions.length > 0 && (
+            <button
+              onClick={() => { setShowIntro(false); setAppState('history'); }}
+              className="w-full py-4 mt-3 bg-transparent border border-gray-600 text-gray-300 font-semibold text-lg rounded-xl active:scale-95 transition-transform"
+            >
+              View History
+            </button>
+          )}
         </div>
       </main>
     );
