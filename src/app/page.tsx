@@ -44,9 +44,9 @@ const GalleryGrid = memo(({
             {clipUrl ? (
               <>
                 {thumbnails[idx] ? (
-                  <img 
-                    src={thumbnails[idx] as string} 
-                    className="w-full h-full object-cover pointer-events-none" 
+                  <img
+                    src={thumbnails[idx] as string}
+                    className="w-full h-full object-cover pointer-events-none"
                     alt={`Swing ${idx + 1}`}
                   />
                 ) : (
@@ -128,9 +128,9 @@ const HistoryList = memo(({ sessions, currentSessionId, onLoad, onDelete }: Hist
               {session.clips.slice(0, 5).map((clip, idx) => (
                 <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
                   {clip.thumbnail ? (
-                    <img 
-                      src={clip.thumbnail} 
-                      className="w-full h-full object-cover" 
+                    <img
+                      src={clip.thumbnail}
+                      className="w-full h-full object-cover"
                       alt={`Swing ${idx + 1}`}
                     />
                   ) : (
@@ -178,7 +178,7 @@ const VideoControls = memo(({
         {/* Row 1: Controls */}
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center gap-4">
-            <button 
+            <button
               onPointerDown={() => onStartStep(-1)}
               onPointerUp={onStopStep}
               onPointerLeave={onStopStep}
@@ -187,15 +187,15 @@ const VideoControls = memo(({
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
-            
-            <button 
-              onClick={onTogglePlay} 
+
+            <button
+              onClick={onTogglePlay}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
             >
               {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
             </button>
 
-            <button 
+            <button
               onPointerDown={() => onStartStep(1)}
               onPointerUp={onStopStep}
               onPointerLeave={onStopStep}
@@ -206,8 +206,8 @@ const VideoControls = memo(({
             </button>
           </div>
 
-          <button 
-            onClick={onTogglePlaybackRate} 
+          <button
+            onClick={onTogglePlaybackRate}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all active:scale-90 border ml-8 ${playbackRate === 0.25 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white/50 border-white/10 text-gray-300'}`}
           >
             <Gauge className="w-4 h-4" />
@@ -218,7 +218,7 @@ const VideoControls = memo(({
         {/* Row 2: Progress */}
         <div className="w-full flex items-center gap-3">
           <div className="flex-1 flex items-center group relative h-6">
-            <input 
+            <input
               type="range"
               min="0"
               max={duration || 0}
@@ -232,12 +232,12 @@ const VideoControls = memo(({
               className="w-full h-1.5 bg-gray-600 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all focus:outline-none"
             />
             {/* Custom Progress Bar background to show "filled" portion */}
-            <div 
+            <div
               className="absolute left-0 top-[10px] h-1.5 bg-blue-500 rounded-full pointer-events-none"
               style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
             />
           </div>
-          
+
           <span className="text-[10px] font-mono text-gray-300 w-16 text-right">
             {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
           </span>
@@ -280,7 +280,7 @@ export default function Home() {
     if (window.speechSynthesis.onvoiceschanged !== undefined) {
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
-  }, []);  
+  }, []);
   // Camera & Recording
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -295,7 +295,7 @@ export default function Home() {
   const sensitivityRef = useRef(100);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [maxZoom, setMaxZoom] = useState(1);
-  
+
   // Real-time audio tracking
   const [shotCount, setShotCount] = useState(0);
   const isRecordingRef = useRef(false);
@@ -346,18 +346,18 @@ export default function Home() {
     const t = audioCtx.currentTime;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    
-    osc.type = 'square'; 
+
+    osc.type = 'square';
     osc.connect(gain);
     gain.connect(audioCtx.destination);
-    
+
     osc.frequency.setValueAtTime(987.77, t);
     osc.frequency.setValueAtTime(1318.51, t + 0.08);
-    
-    gain.gain.setValueAtTime(0.1, t); 
+
+    gain.gain.setValueAtTime(0.1, t);
     gain.gain.setValueAtTime(0.1, t + 0.08);
     gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
-    
+
     osc.start(t);
     osc.stop(t + 0.4);
   };
@@ -369,7 +369,7 @@ export default function Home() {
         playbackAudioContextRef.current = new AudioContextClass();
       }
       const ctx = playbackAudioContextRef.current;
-      
+
       // Explicitly resume for Safari
       if (ctx.state === 'suspended') {
         ctx.resume().then(() => {
@@ -388,21 +388,21 @@ export default function Home() {
     const t = ctx.currentTime;
     // We'll play a 3-note ascending arpeggio (C4, E4, G4, C5)
     const notes = [261.63, 329.63, 392.00, 523.25];
-    
+
     notes.forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
+
       osc.type = 'square'; // 8-bit retro feel
       osc.frequency.setValueAtTime(freq, t + (i * 0.1));
-      
+
       gain.gain.setValueAtTime(0, t + (i * 0.1));
       gain.gain.linearRampToValueAtTime(0.1, t + (i * 0.1) + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.001, t + (i * 0.1) + 0.15);
-      
+
       osc.connect(gain);
       gain.connect(ctx.destination);
-      
+
       osc.start(t + (i * 0.1));
       osc.stop(t + (i * 0.1) + 0.15);
     });
@@ -419,21 +419,21 @@ export default function Home() {
 
       const t = ctx.currentTime;
       const notes = [196.00, 164.81, 130.81]; // G3, E3, C3
-      
+
       notes.forEach((freq, i) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        
+
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(freq, t + (i * 0.15));
-        
+
         gain.gain.setValueAtTime(0, t + (i * 0.15));
         gain.gain.linearRampToValueAtTime(0.1, t + (i * 0.15) + 0.01);
         gain.gain.exponentialRampToValueAtTime(0.001, t + (i * 0.15) + 0.2);
-        
+
         osc.connect(gain);
         gain.connect(ctx.destination);
-        
+
         osc.start(t + (i * 0.15));
         osc.stop(t + (i * 0.15) + 0.2);
       });
@@ -447,7 +447,7 @@ export default function Home() {
   const [isBurning, setIsBurning] = useState(false);
   const [burnProgress, setBurnProgress] = useState('');
 
-  
+
   // Persistence & History
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
@@ -485,9 +485,9 @@ export default function Home() {
   // Drawing Tool State
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawMode, setDrawMode] = useState<'line' | 'circle' | 'erase'>('line');
-  const [shapes, setShapes] = useState<{type: 'line' | 'circle', start: {x: number, y: number}, end: {x: number, y: number}}[]>([]);
-  const [currentShape, setCurrentShape] = useState<{type: 'line' | 'circle', start: {x: number, y: number}, end: {x: number, y: number}} | null>(null);
-  const [draggedHandle, setDraggedHandle] = useState<{shapeIndex: number, handle: 'start' | 'end'} | null>(null);
+  const [shapes, setShapes] = useState<{ type: 'line' | 'circle', start: { x: number, y: number }, end: { x: number, y: number } }[]>([]);
+  const [currentShape, setCurrentShape] = useState<{ type: 'line' | 'circle', start: { x: number, y: number }, end: { x: number, y: number } } | null>(null);
+  const [draggedHandle, setDraggedHandle] = useState<{ shapeIndex: number, handle: 'start' | 'end' } | null>(null);
   const [drawColor] = useState('#22c55e'); // Green
 
   // Redraw canvas whenever lines change
@@ -502,7 +502,7 @@ export default function Home() {
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
 
-    const drawShape = (s: {type: 'line' | 'circle', start: {x: number, y: number}, end: {x: number, y: number}}, isCurrent = false) => {
+    const drawShape = (s: { type: 'line' | 'circle', start: { x: number, y: number }, end: { x: number, y: number } }, isCurrent = false) => {
       ctx.beginPath();
       if (s.type === 'line') {
         ctx.moveTo(s.start.x, s.start.y);
@@ -516,10 +516,10 @@ export default function Home() {
       ctx.stroke();
 
       // Draw handles
-      const drawHandle = (p: {x: number, y: number}) => {
+      const drawHandle = (p: { x: number, y: number }) => {
         ctx.beginPath();
         ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = isCurrent ? '#3b82f6' : 'white'; 
+        ctx.fillStyle = isCurrent ? '#3b82f6' : 'white';
         ctx.fill();
         ctx.strokeStyle = drawColor;
         ctx.lineWidth = 2;
@@ -547,12 +547,12 @@ export default function Home() {
       for (let i = shapes.length - 1; i >= 0; i--) {
         const s = shapes[i];
         let isHit = false;
-        
+
         const distStart = Math.sqrt((x - s.start.x) ** 2 + (y - s.start.y) ** 2);
         const distEnd = Math.sqrt((x - s.end.x) ** 2 + (y - s.end.y) ** 2);
 
         if (s.type === 'line') {
-          const l2 = (s.start.x - s.end.x)**2 + (s.start.y - s.end.y)**2;
+          const l2 = (s.start.x - s.end.x) ** 2 + (s.start.y - s.end.y) ** 2;
           let hitLine = false;
           if (l2 === 0) {
             hitLine = distStart < clickDistThreshold;
@@ -561,7 +561,7 @@ export default function Home() {
             t = Math.max(0, Math.min(1, t));
             const projX = s.start.x + t * (s.end.x - s.start.x);
             const projY = s.start.y + t * (s.end.y - s.start.y);
-            hitLine = Math.sqrt((x - projX)**2 + (y - projY)**2) < clickDistThreshold;
+            hitLine = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2) < clickDistThreshold;
           }
           isHit = hitLine || distStart < clickDistThreshold || distEnd < clickDistThreshold;
         } else {
@@ -569,7 +569,7 @@ export default function Home() {
           const hitCircumference = Math.abs(distStart - radius) < clickDistThreshold;
           isHit = hitCircumference || distStart < clickDistThreshold;
         }
-        
+
         if (isHit) {
           const newShapes = [...shapes];
           newShapes.splice(i, 1);
@@ -657,6 +657,7 @@ export default function Home() {
   const stepDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const continuousStepActiveRef = useRef(false);
   const isSteppingRef = useRef(false);
+  const rvfcHandleRef = useRef<number | null>(null);
   const selectedClipIndexRef = useRef<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
@@ -668,7 +669,7 @@ export default function Home() {
   const togglePlay = () => {
     if (mainVideoRef.current) {
       if (mainVideoRef.current.paused) {
-        mainVideoRef.current.play().catch(() => {});
+        mainVideoRef.current.play().catch(() => { });
       } else {
         mainVideoRef.current.pause();
       }
@@ -710,15 +711,20 @@ export default function Home() {
         video.play().catch(() => {});
         const cb = (_: number, meta: { mediaTime: number }) => {
           if (meta.mediaTime > startMediaTime + 0.005) {
-            video.pause();
-            isSteppingRef.current = false;
+            rvfcHandleRef.current = null;
+            // Guard: if stepping was cancelled while this callback was in flight,
+            // don't pause — the user may have already started normal playback.
+            if (isSteppingRef.current) {
+              video.pause();
+              isSteppingRef.current = false;
+            }
             setCurrentTime(video.currentTime);
             resolve();
           } else {
-            (video as any).requestVideoFrameCallback(cb);
+            rvfcHandleRef.current = (video as any).requestVideoFrameCallback(cb);
           }
         };
-        (video as any).requestVideoFrameCallback(cb);
+        rvfcHandleRef.current = (video as any).requestVideoFrameCallback(cb);
       });
     };
 
@@ -820,7 +826,12 @@ export default function Home() {
   const stopContinuousStep = () => {
     continuousStepActiveRef.current = false;
     isSteppingRef.current = false;
-    // Pause immediately in case an RVFC play() is still in flight
+    // Cancel any pending RVFC callback so it can't fire during normal playback
+    // and call video.pause() unexpectedly.
+    if (rvfcHandleRef.current !== null && mainVideoRef.current) {
+      (mainVideoRef.current as any).cancelVideoFrameCallback(rvfcHandleRef.current);
+      rvfcHandleRef.current = null;
+    }
     if (mainVideoRef.current) mainVideoRef.current.pause();
     if (stepDelayTimeoutRef.current) {
       clearTimeout(stepDelayTimeoutRef.current);
@@ -913,15 +924,15 @@ export default function Home() {
     ctx.lineWidth = 4 / scale; // Scaled line width for video
     ctx.lineCap = 'round';
 
-    const scalePoint = (p: {x: number, y: number}) => ({
+    const scalePoint = (p: { x: number, y: number }) => ({
       x: (p.x - offsetX) / scale,
       y: (p.y - offsetY) / scale
     });
 
-    const drawShapeToCtx = (s: {type: 'line' | 'circle', start: {x: number, y: number}, end: {x: number, y: number}}) => {
+    const drawShapeToCtx = (s: { type: 'line' | 'circle', start: { x: number, y: number }, end: { x: number, y: number } }) => {
       const start = scalePoint(s.start);
       const end = scalePoint(s.end);
-      
+
       ctx.beginPath();
       if (s.type === 'line') {
         ctx.moveTo(start.x, start.y);
@@ -946,7 +957,7 @@ export default function Home() {
     if (selectedClipIndex === null) return;
     const url = clips[selectedClipIndex];
     if (!url) return;
-    
+
     const overlayBlob = await generateOverlayBlob();
     if (!overlayBlob) {
       downloadClip(url, selectedClipIndex);
@@ -972,7 +983,7 @@ export default function Home() {
     if (selectedClipIndex === null) return;
     const url = clips[selectedClipIndex];
     if (!url) return;
-    
+
     const overlayBlob = await generateOverlayBlob();
     if (!overlayBlob) {
       shareClip(url, selectedClipIndex);
@@ -1012,7 +1023,7 @@ export default function Home() {
 
         const arrayBuffer = await videoBlob.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
-        
+
         let thumbnailBase64 = '';
         if (thumbnailData) {
           const binary = Array.from(thumbnailData).map(b => String.fromCharCode(b)).join('');
@@ -1031,7 +1042,7 @@ export default function Home() {
           clips: updatedClips
         };
         await saveSession(updatedSession);
-        
+
         // Update UI state for thumbnails if we got a new one
         if (thumbnailBase64) {
           setThumbnails(prev => {
@@ -1047,13 +1058,13 @@ export default function Home() {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
     });
-    
+
     return dbQueue;
   };
 
   const updateNotesInDB = useCallback(async () => {
     if (currentSessionId === null) return;
-    
+
     // Add to sequential queue
     dbQueue = dbQueue.then(async () => {
       try {
@@ -1075,7 +1086,7 @@ export default function Home() {
         console.error("Error updating notes in DB:", err);
       }
     });
-    
+
     return dbQueue;
   }, [currentSessionId, sessionName, sessionNotes, shotNotes, favorites]);
 
@@ -1124,19 +1135,19 @@ export default function Home() {
     if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
     try {
       const constraints: MediaStreamConstraints = {
-        video: selectedDeviceId 
-          ? { 
-              deviceId: { exact: selectedDeviceId }, 
-              width: { ideal: 1280 }, 
-              height: { ideal: 720 },
-              frameRate: USE_HIGH_FRAMERATE ? { ideal: 60 } : { ideal: 30 }
-            }
-          : { 
-              facingMode: 'environment', 
-              width: { ideal: 1280 }, 
-              height: { ideal: 720 },
-              frameRate: USE_HIGH_FRAMERATE ? { ideal: 60 } : { ideal: 30 }
-            },
+        video: selectedDeviceId
+          ? {
+            deviceId: { exact: selectedDeviceId },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: USE_HIGH_FRAMERATE ? { ideal: 60 } : { ideal: 30 }
+          }
+          : {
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: USE_HIGH_FRAMERATE ? { ideal: 60 } : { ideal: 30 }
+          },
         audio: true
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -1146,10 +1157,10 @@ export default function Home() {
 
       // Reset zoom state on camera switch
       setZoomLevel(1);
-      
+
       const track = stream.getVideoTracks()[0];
       const settings = track.getSettings();
-      
+
       // Detect actual achieved frame rate
       if (settings.frameRate) {
         frameRateRef.current = settings.frameRate;
@@ -1190,18 +1201,18 @@ export default function Home() {
     loadHistory();
   }, []);
 
-  const toggleCamera = () => { 
+  const toggleCamera = () => {
     if (isRecording || videoDevices.length === 0) return;
 
     const currentTrack = streamRef.current?.getVideoTracks()[0];
     const currentId = currentTrack?.getSettings().deviceId || selectedDeviceId;
-    
+
     let currentIndex = videoDevices.findIndex(d => d.deviceId === currentId);
     if (currentIndex === -1) currentIndex = 0;
-    
+
     const nextIndex = (currentIndex + 1) % videoDevices.length;
     const nextDevice = videoDevices[nextIndex];
-    
+
     setSelectedDeviceId(nextDevice.deviceId);
     setActiveDeviceName(nextDevice.label || `Camera ${nextIndex + 1}`);
     setShowDeviceToast(true);
@@ -1211,7 +1222,7 @@ export default function Home() {
   const toggleZoom = async () => {
     if (!streamRef.current || maxZoom <= 1) return;
     const track = streamRef.current.getVideoTracks()[0];
-    
+
     let nextZoom = zoomLevel === 1 ? 2 : (zoomLevel === 2 && maxZoom >= 5) ? 5 : 1;
     if (nextZoom > maxZoom) nextZoom = 1;
 
@@ -1237,7 +1248,7 @@ export default function Home() {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     const audioCtx = new AudioContextClass();
     audioContextRef.current = audioCtx;
-    
+
     // Resume context if suspended (common in Safari)
     if (audioCtx.state === 'suspended') {
       audioCtx.resume();
@@ -1259,7 +1270,7 @@ export default function Home() {
 
     const detectLoop = () => {
       analyser.getFloatTimeDomainData(dataArray);
-      
+
       // Apply High-Pass Filter and calculate energy for the current frame
       let sum = 0;
       for (let i = 0; i < dataArray.length; i++) {
@@ -1269,7 +1280,7 @@ export default function Home() {
         prevFiltered = filtered;
         sum += Math.abs(filtered);
       }
-      
+
       // Direct DOM update for the meter bar to bypass React render throttling
       if (meterRef.current) {
         // Unify scale to 150 (the max possible threshold)
@@ -1286,13 +1297,13 @@ export default function Home() {
 
       if (sum > threshold && isLocalSpike && (now - lastTriggerTimeRef.current > 3000)) {
         const timeSinceStart = recordingStartTimeRef.current ? (now - recordingStartTimeRef.current) : 0;
-        
+
         // Conditions to trigger:
         // 1. Not recording (Preflight mode)
         // 2. Recording and > 1s has passed
         if (!isRecordingRef.current || timeSinceStart > 1000) {
           lastTriggerTimeRef.current = now;
-          
+
           if (isRecordingRef.current) {
             impactTimesRef.current.push(timeSinceStart / 1000);
             setShotCount(prev => prev + 1);
@@ -1300,7 +1311,7 @@ export default function Home() {
             setIsPreflightTriggered(true);
             setTimeout(() => setIsPreflightTriggered(false), 500);
           }
-          
+
           playCoinSound(audioCtx);
         }
       }
@@ -1326,16 +1337,16 @@ export default function Home() {
     recordingStartTimeRef.current = Date.now();
     impactTimesRef.current = [];
     setShotCount(0);
-    
+
     // Reset audio detection state for the new recording session
     lastTriggerTimeRef.current = 0;
     energyHistoryRef.current = [0, 0];
-    
+
     // Clear previous session metadata for the new recording
     setSessionName('');
     setSessionNotes('');
     setCurrentSessionId(null);
-    
+
     isRecordingRef.current = true;
     setIsRecording(true);
 
@@ -1349,7 +1360,7 @@ export default function Home() {
       const impacts = impactTimesRef.current;
       recordingStartTimeRef.current = 0;
 
-      const fullVideoBlob = new Blob(chunks, { type: mediaRecorder.mimeType });      
+      const fullVideoBlob = new Blob(chunks, { type: mediaRecorder.mimeType });
       try {
         if (impacts.length === 0) {
           alert("No swings detected. Try again and adjust sensitivity.");
@@ -1436,13 +1447,13 @@ export default function Home() {
       // Delay actual stop/transition so sound is heard
       setTimeout(async () => {
         if (!mediaRecorderRef.current) return;
-        
+
         // Ensure context exists and is resumed during this user gesture for Safari
         if (!playbackAudioContextRef.current) {
           const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
           playbackAudioContextRef.current = new AudioContextClass();
         }
-        
+
         if (playbackAudioContextRef.current.state === 'suspended') {
           playbackAudioContextRef.current.resume();
         }
@@ -1542,20 +1553,20 @@ export default function Home() {
   const deleteClip = async (index: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("Delete this swing?")) return;
-    
+
     const newClips = [...clips];
     const urlToRemove = newClips[index];
     newClips.splice(index, 1);
-    
+
     const newNotes = [...shotNotes];
     newNotes.splice(index, 1);
-    
+
     const newThumbnails = [...thumbnails];
     newThumbnails.splice(index, 1);
-    
+
     const newFavs = [...favorites];
     newFavs.splice(index, 1);
-    
+
     setClips(newClips);
     setShotNotes(newNotes);
     setThumbnails(newThumbnails);
@@ -1573,7 +1584,7 @@ export default function Home() {
         setSelectedClipIndex(selectedClipIndex - 1);
       }
     }
-    
+
     if (urlToRemove) URL.revokeObjectURL(urlToRemove);
 
     if (currentSessionId !== null) {
@@ -1583,13 +1594,13 @@ export default function Home() {
         if (currentSession) {
           const newDbClips = [...currentSession.clips];
           newDbClips.splice(index, 1);
-          
+
           if (newDbClips.length === 0) {
             await deleteSession(currentSessionId);
             setAppState('camera');
             return;
           }
-          
+
           const updatedSession: Session = {
             ...currentSession,
             clips: newDbClips
@@ -1626,6 +1637,7 @@ export default function Home() {
             <br /><br />
             <span className="text-blue-400 font-semibold">Shots are detected by impact sound</span>, so this works best in an indoor or isolated setting.
           </p>
+          <p className="text-gray-300 text-lg leading-relaxed mb-12">You'll see an audio preview on the next screen where you can dial in sensitivity for shot detection.</p>
           <button
             onClick={dismissIntro}
             className="w-full py-4 bg-white text-black font-bold text-lg rounded-xl shadow-lg active:scale-95 transition-transform"
@@ -1647,7 +1659,7 @@ export default function Home() {
 
   return (
     <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden select-none">
-      
+
       {appState === 'camera' && (
         <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover absolute inset-0 z-0" />
@@ -1655,24 +1667,24 @@ export default function Home() {
             <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
             <div className="flex flex-col items-end gap-3">
               {!isRecording && (
-               <div className="flex gap-3">
-                 {maxZoom > 1 && (
-                   <button onClick={toggleZoom} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90 flex items-center justify-center gap-1 relative">
-                     <ZoomIn className="w-6 h-6 text-white" />
-                     <span className="absolute -bottom-1 -right-1 bg-blue-600 text-[9px] font-bold px-1 rounded-full">{zoomLevel}x</span>
-                   </button>
-                 )}
-                 <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><History className="w-6 h-6 text-white" /></button>
-                 <button onClick={toggleCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><Camera className="w-6 h-6 text-white" /></button>
-               </div>
+                <div className="flex gap-3">
+                  {maxZoom > 1 && (
+                    <button onClick={toggleZoom} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90 flex items-center justify-center gap-1 relative">
+                      <ZoomIn className="w-6 h-6 text-white" />
+                      <span className="absolute -bottom-1 -right-1 bg-blue-600 text-[9px] font-bold px-1 rounded-full">{zoomLevel}x</span>
+                    </button>
+                  )}
+                  <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><History className="w-6 h-6 text-white" /></button>
+                  <button onClick={toggleCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><Camera className="w-6 h-6 text-white" /></button>
+                </div>
               )}            </div>
           </div>
 
           {/* Camera Switch Toast */}
           <div className={`absolute top-24 inset-x-0 flex justify-center z-20 pointer-events-none transition-all duration-300 ${showDeviceToast ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
-           <div className="bg-black/60 backdrop-blur-md text-white text-xs font-bold px-4 py-2 rounded-full border border-white/10 shadow-xl max-w-[80%] text-center truncate">
-             {activeDeviceName}
-           </div>
+            <div className="bg-black/60 backdrop-blur-md text-white text-xs font-bold px-4 py-2 rounded-full border border-white/10 shadow-xl max-w-[80%] text-center truncate">
+              {activeDeviceName}
+            </div>
           </div>
 
           <div className="absolute inset-x-0 bottom-0 pb-12 pt-24 bg-gradient-to-t from-black/80 to-transparent z-10 flex flex-col items-center justify-end pointer-events-none">
@@ -1682,35 +1694,35 @@ export default function Home() {
                   <span>Audio Sensitivity Adjustment</span>
                   <div className={`w-2 h-2 rounded-full transition-all duration-300 ${isPreflightTriggered ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-gray-600'}`}></div>
                 </div>
-                
+
                 {/* Audio Level Meter */}
                 <div className="w-full h-1.5 bg-gray-800 rounded-full relative mb-6 overflow-hidden">
-                  <div 
+                  <div
                     ref={meterRef}
-                    className="h-full bg-blue-500/80 transition-[width] duration-75 ease-out" 
+                    className="h-full bg-blue-500/80 transition-[width] duration-75 ease-out"
                     style={{ width: '0%' }}
                   />
-                  <div 
-                    className="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_5px_white] z-10" 
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_5px_white] z-10"
                     style={{ left: `${Math.min(100, ((150 - (sensitivity / 100) * 140) / 150) * 100)}%` }}
                   />
                 </div>
 
                 {/* Stepped Sensitivity Controls */}
                 <div className="flex items-center justify-between w-full px-2">
-                  <button 
+                  <button
                     onClick={() => setSensitivity(s => Math.max(0, s - 10))}
                     className="p-3 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 active:scale-90 transition-all"
                   >
                     <Minus className="w-5 h-5 text-white" />
                   </button>
-                  
+
                   <div className="flex flex-col items-center">
                     <span className="text-2xl font-black text-white tabular-nums">{sensitivity}</span>
                     <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Sensitivity</span>
                   </div>
 
-                  <button 
+                  <button
                     onClick={() => setSensitivity(s => Math.min(100, s + 10))}
                     className="p-3 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 active:scale-90 transition-all"
                   >
@@ -1725,16 +1737,16 @@ export default function Home() {
                   <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div>
                   <span className="drop-shadow-md uppercase tracking-widest text-xs text-white">Recording</span>
                 </div>
-                
+
                 {/* Visual Audio Feedback during recording */}
                 <div className="w-48 h-1 bg-gray-800 rounded-full relative mb-4 overflow-hidden border border-white/5">
-                  <div 
+                  <div
                     ref={meterRef}
-                    className="h-full bg-blue-500/80 transition-[width] duration-75 ease-out" 
+                    className="h-full bg-blue-500/80 transition-[width] duration-75 ease-out"
                     style={{ width: '0%' }}
                   />
-                  <div 
-                    className="absolute top-0 bottom-0 w-0.5 bg-white/50 z-10" 
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-white/50 z-10"
                     style={{ left: `${Math.min(100, ((150 - (sensitivity / 100) * 140) / 150) * 100)}%` }}
                   />
                 </div>
@@ -1762,16 +1774,16 @@ export default function Home() {
       {appState === 'history' && (
         <div className="flex-1 flex flex-col bg-gray-950 z-20 overflow-hidden">
           <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
-             <div className="flex items-center gap-3">
-               <button onClick={() => setAppState('camera')} className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"><ChevronLeft className="w-5 h-5" /></button>
-               <div><h1 className="text-lg font-bold text-white">History</h1><p className="text-xs text-gray-400">{sessions.length} sessions saved</p></div>
-             </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setAppState('camera')} className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"><ChevronLeft className="w-5 h-5" /></button>
+              <div><h1 className="text-lg font-bold text-white">History</h1><p className="text-xs text-gray-400">{sessions.length} sessions saved</p></div>
+            </div>
           </div>
-          <HistoryList 
-            sessions={sessions} 
-            currentSessionId={currentSessionId} 
-            onLoad={loadSession} 
-            onDelete={deleteHistorySession} 
+          <HistoryList
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            onLoad={loadSession}
+            onDelete={deleteHistorySession}
           />
         </div>
       )}
@@ -1787,39 +1799,39 @@ export default function Home() {
       {appState === 'gallery' && (
         <div className="flex-1 flex flex-col bg-gray-950 z-20 overflow-hidden">
           <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
-             <div><h1 className="text-lg font-bold text-white">Session Gallery</h1><p className="text-xs text-gray-400">{clips.length} swings captured</p></div>
-             <div className="flex gap-2">
-               <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><History className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">History</span></button>
-               <button onClick={downloadAllAsZip} className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"><Archive className="w-4 h-4 text-white" /><span className="text-sm font-semibold text-white">ZIP All</span></button>
-               <button onClick={resetApp} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><RotateCcw className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">New</span></button>
-             </div>
+            <div><h1 className="text-lg font-bold text-white">Session Gallery</h1><p className="text-xs text-gray-400">{clips.length} swings captured</p></div>
+            <div className="flex gap-2">
+              <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><History className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">History</span></button>
+              <button onClick={downloadAllAsZip} className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"><Archive className="w-4 h-4 text-white" /><span className="text-sm font-semibold text-white">ZIP All</span></button>
+              <button onClick={resetApp} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><RotateCcw className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">New</span></button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto bg-gray-950">
-             <div className="p-4 max-w-7xl mx-auto w-full">
-               <div className="flex flex-col md:flex-row gap-4 mb-6">
-                 <div className="flex-1 bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg">
-                    <div className="flex items-center gap-2 mb-2 text-blue-400"><FileText className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Session Name</h3></div>
-                    <input type="text" value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="e.g. 7-Iron Drills..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" />
-                 </div>
-                 <div className="flex-1 bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg">
-                    <div className="flex items-center gap-2 mb-2 text-blue-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Overall Session Notes</h3></div>
-                    <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[45px]" />
-                 </div>
-               </div>
-               <GalleryGrid
-                 clips={clips}
-                 thumbnails={thumbnails}
-                 shotNotes={shotNotes}
-                 favorites={favorites}
-                 clipByteSizes={clipByteSizes}
-                 progressText={progressText}
-                 onSelect={setSelectedClipIndex}
-                 onDelete={deleteClip}
-                 onShare={shareClip}
-                 onDownload={downloadClip}
-                 onToggleFavorite={toggleFavorite}
-               />
-             </div>
+            <div className="p-4 max-w-7xl mx-auto w-full">
+              <div className="flex flex-col md:flex-row gap-4 mb-6">
+                <div className="flex-1 bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg">
+                  <div className="flex items-center gap-2 mb-2 text-blue-400"><FileText className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Session Name</h3></div>
+                  <input type="text" value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="e.g. 7-Iron Drills..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" />
+                </div>
+                <div className="flex-1 bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg">
+                  <div className="flex items-center gap-2 mb-2 text-blue-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Overall Session Notes</h3></div>
+                  <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[45px]" />
+                </div>
+              </div>
+              <GalleryGrid
+                clips={clips}
+                thumbnails={thumbnails}
+                shotNotes={shotNotes}
+                favorites={favorites}
+                clipByteSizes={clipByteSizes}
+                progressText={progressText}
+                onSelect={setSelectedClipIndex}
+                onDelete={deleteClip}
+                onShare={shareClip}
+                onDownload={downloadClip}
+                onToggleFavorite={toggleFavorite}
+              />
+            </div>
           </div>
 
           {selectedClipIndex !== null && (
@@ -1832,20 +1844,20 @@ export default function Home() {
               )}
 
               {/* Fullscreen Video Container */}              <div className="absolute inset-0 bg-black overflow-hidden">
-                <video 
-                  ref={mainVideoRef} 
-                  key={clips[selectedClipIndex] as string} 
-                  src={clips[selectedClipIndex] as string} 
-                  autoPlay 
-                  loop 
-                  playsInline 
+                <video
+                  ref={mainVideoRef}
+                  key={clips[selectedClipIndex] as string}
+                  src={clips[selectedClipIndex] as string}
+                  autoPlay
+                  loop
+                  playsInline
                   onTimeUpdate={handleTimeUpdate}
                   onLoadedMetadata={handleLoadedMetadata}
                   onPlay={() => { if (!isSteppingRef.current) setIsPlaying(true); }}
                   onPause={() => { if (!isSteppingRef.current) setIsPlaying(false); }}
-                  className="w-full h-full object-cover absolute inset-0 z-0" 
+                  className="w-full h-full object-cover absolute inset-0 z-0"
                 />
-                
+
                 {/* Telestrator Canvas */}
                 <canvas
                   ref={canvasRef}
@@ -1863,7 +1875,7 @@ export default function Home() {
                 />
 
                 {/* Custom Video Controls */}
-                <VideoControls 
+                <VideoControls
                   currentTime={currentTime}
                   duration={duration}
                   isPlaying={isPlaying}
@@ -1898,8 +1910,8 @@ export default function Home() {
                     )}
                   </div>
                   <div className="flex gap-1.5 mt-1">
-                    <button 
-                      onClick={() => setDrawMode(drawMode === 'line' ? 'circle' : 'line')} 
+                    <button
+                      onClick={() => setDrawMode(drawMode === 'line' ? 'circle' : 'line')}
                       className={`flex items-center justify-center p-2 rounded-lg transition-colors ${(drawMode === 'circle' || drawMode === 'line') ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}
                       title={`Switch to ${drawMode === 'circle' ? 'Line' : 'Circle'}`}
                     >
@@ -1909,24 +1921,24 @@ export default function Home() {
                           <circle cx="5" cy="19" r="1.5" fill="currentColor" />
                           <circle cx="19" cy="5" r="1.5" fill="currentColor" />
                         </svg>
-                      )} 
+                      )}
                     </button>
-                    <button 
-                      onClick={() => setDrawMode(drawMode === 'erase' ? 'line' : 'erase')} 
+                    <button
+                      onClick={() => setDrawMode(drawMode === 'erase' ? 'line' : 'erase')}
                       className={`flex items-center justify-center p-2 rounded-lg transition-colors ${drawMode === 'erase' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
                       title="Eraser"
                     >
                       <Eraser className="w-4 h-4" />
                     </button>
-                    <button 
-                      onClick={clearCanvas} 
+                    <button
+                      onClick={clearCanvas}
                       className="flex items-center justify-center p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white transition-colors"
                       title="Clear All"
                     >
                       <X className="w-4 h-4" />
                     </button>
-                    <button 
-                      onClick={() => setShowNotes(!showNotes)} 
+                    <button
+                      onClick={() => setShowNotes(!showNotes)}
                       className={`flex items-center justify-center p-2 rounded-lg transition-colors ${showNotes ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}
                       title="Toggle Notes"
                     >
@@ -1935,8 +1947,8 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 pointer-events-auto">
-                  <button 
-                    onClick={(e) => selectedClipIndex !== null && toggleFavorite(selectedClipIndex, e)} 
+                  <button
+                    onClick={(e) => selectedClipIndex !== null && toggleFavorite(selectedClipIndex, e)}
                     className={`p-2.5 rounded-full shadow-lg active:scale-90 transition-all ${selectedClipIndex !== null && favorites[selectedClipIndex] ? 'bg-amber-500 text-white' : 'bg-gray-800 text-white hover:text-amber-400'}`}
                     title="Favorite"
                   >
@@ -1944,9 +1956,9 @@ export default function Home() {
                   </button>
                   <button onClick={handleFullscreenShare} className="p-2.5 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Share"><Share2 className="w-5 h-5" /></button>
                   <button onClick={handleFullscreenDownload} className="p-2.5 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Download"><Download className="w-5 h-5" /></button>
-                  <button 
-                    onClick={(e) => selectedClipIndex !== null && deleteClip(selectedClipIndex, e)} 
-                    className="p-2.5 bg-gray-800 text-red-400 rounded-full shadow-lg active:scale-90 transition-transform hover:bg-red-900/40" 
+                  <button
+                    onClick={(e) => selectedClipIndex !== null && deleteClip(selectedClipIndex, e)}
+                    className="p-2.5 bg-gray-800 text-red-400 rounded-full shadow-lg active:scale-90 transition-transform hover:bg-red-900/40"
                     title="Delete"
                   >
                     <Trash2 className="w-5 h-5" />
@@ -1963,11 +1975,11 @@ export default function Home() {
                       <FileText className="w-5 h-5" />
                       <h3 className="font-bold text-sm uppercase tracking-wider">Clip Notes</h3>
                     </div>
-                    <textarea 
-                      value={shotNotes[selectedClipIndex]} 
-                      onChange={(e) => updateShotNote(selectedClipIndex, e.target.value)} 
-                      placeholder="Record feedback for this swing..." 
-                      className="w-full bg-black/40 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[120px]" 
+                    <textarea
+                      value={shotNotes[selectedClipIndex]}
+                      onChange={(e) => updateShotNote(selectedClipIndex, e.target.value)}
+                      placeholder="Record feedback for this swing..."
+                      className="w-full bg-black/40 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[120px]"
                     />
                   </div>
                 </div>
