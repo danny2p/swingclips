@@ -50,6 +50,18 @@ export const saveSession = async (session: Session): Promise<void> => {
   });
 };
 
+export const getSession = async (id: number): Promise<Session | null> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.get(id);
+
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+};
+
 export const getAllSessions = async (): Promise<Session[]> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {

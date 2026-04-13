@@ -1,18 +1,275 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
 import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
-import { Session, getAllSessions, saveSession, deleteSession } from '@/utils/db';
+import { Session, getAllSessions, saveSession, deleteSession, getSession } from '@/utils/db';
 import JSZip from 'jszip';
+
+// Sequential DB queue to prevent overlapping transactions and data corruption on mobile
+let dbQueue = Promise.resolve();
+
+// Session Limits
+const MAX_RECORDING_MINUTES = 5;
+const MAX_SHOTS = 30;
+
+// High-framerate testing flag (Set to false to revert to standard 30fps logic)
+const USE_HIGH_FRAMERATE = false;
+
+// --- MEMOIZED SUB-COMPONENTS ---
+
+interface GalleryGridProps {
+  clips: (string | null)[];
+  thumbnails: (string | null)[];
+  shotNotes: string[];
+  favorites: boolean[];
+  clipByteSizes: (number | null)[];
+  progressText: string;
+  onSelect: (idx: number) => void;
+  onDelete: (idx: number, e: React.MouseEvent) => void;
+  onShare: (url: string, idx: number) => void;
+  onDownload: (url: string, idx: number) => void;
+  onToggleFavorite: (idx: number, e: React.MouseEvent) => void;
+}
+
+const GalleryGrid = memo(({
+  clips, thumbnails, shotNotes, favorites, clipByteSizes, progressText,
+  onSelect, onDelete, onShare, onDownload, onToggleFavorite
+}: GalleryGridProps) => {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+      {clips.map((clipUrl, idx) => (
+        <div key={idx} onClick={() => clipUrl && onSelect(idx)} className={`relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 transition-transform ${clipUrl ? 'cursor-pointer active:scale-95' : 'opacity-70'}`}>
+          <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
+            {clipUrl ? (
+              <>
+                {thumbnails[idx] ? (
+                  <img 
+                    src={thumbnails[idx] as string} 
+                    className="w-full h-full object-cover pointer-events-none" 
+                    alt={`Swing ${idx + 1}`}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center text-center p-4">
+                    <Loader2 className="w-6 h-6 animate-spin text-blue-500/30 mb-2" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-700">Loading...</span>
+                  </div>
+                )}
+                {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
+                {clipByteSizes[idx] != null && (
+                  <div className="absolute bottom-2 left-2 z-10">
+                    <span className="bg-black/70 text-gray-300 text-[9px] font-mono px-1.5 py-0.5 rounded-full backdrop-blur-sm">
+                      {clipByteSizes[idx]! < 1024 * 1024
+                        ? `${Math.round(clipByteSizes[idx]! / 1024)}KB`
+                        : `${(clipByteSizes[idx]! / (1024 * 1024)).toFixed(1)}MB`}
+                    </span>
+                  </div>
+                )}
+                <button
+                  onClick={(e) => onToggleFavorite(idx, e)}
+                  className="absolute top-2 left-2 p-1.5 bg-black/40 hover:bg-black/60 rounded-full backdrop-blur-md transition-all shadow-lg z-10"
+                >
+                  <Star className={`w-4 h-4 ${favorites[idx] ? 'fill-white text-white' : 'text-white'}`} />
+                </button>
+              </>
+            ) : (
+              <div className="flex flex-col items-center text-center p-4">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-500/50 mb-2" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600">Slicing...</span>
+              </div>
+            )}
+          </div>
+          <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
+            <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
+            {clipUrl && (
+              <div className="flex gap-2">
+                <button onClick={(e) => onDelete(idx, e)} className="p-1.5 bg-gray-800 hover:bg-red-900/50 rounded-md text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); onShare(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"><Share2 className="w-4 h-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); onDownload(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"><Download className="w-4 h-4" /></button>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+});
+GalleryGrid.displayName = 'GalleryGrid';
+
+interface HistoryListProps {
+  sessions: Session[];
+  currentSessionId: number | null;
+  onLoad: (session: Session) => void;
+  onDelete: (e: React.MouseEvent, id: number) => void;
+}
+
+const HistoryList = memo(({ sessions, currentSessionId, onLoad, onDelete }: HistoryListProps) => {
+  return (
+    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      {sessions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+          <History className="w-12 h-12 mb-4 opacity-20" />
+          <p>No saved sessions yet.</p>
+        </div>
+      ) : (
+        sessions.map((session) => (
+          <div key={session.id} onClick={() => onLoad(session)} className="bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg cursor-pointer hover:border-blue-500/50 transition-all active:scale-[0.98]">
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <h3 className="font-bold text-white">{session.sessionName || new Date(session.id).toLocaleDateString()}</h3>
+                <p className="text-xs text-gray-500">{session.sessionName ? new Date(session.id).toLocaleDateString() + ' • ' : ''}{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
+              </div>
+              <button onClick={(e) => onDelete(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+            </div>
+            {session.sessionNotes && (
+              <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">&quot;{session.sessionNotes}&quot;</p>
+            )}
+            <div className="flex gap-2 mt-3 overflow-hidden h-12">
+              {session.clips.slice(0, 5).map((clip, idx) => (
+                <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
+                  {clip.thumbnail ? (
+                    <img 
+                      src={clip.thumbnail} 
+                      className="w-full h-full object-cover" 
+                      alt={`Swing ${idx + 1}`}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                      <Video className="w-4 h-4 text-gray-600" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {session.clips.length > 5 && (
+                <div className="h-full aspect-square bg-gray-800 rounded flex items-center justify-center text-[10px] font-bold text-gray-500">+{session.clips.length - 5}</div>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+});
+HistoryList.displayName = 'HistoryList';
+
+interface VideoControlsProps {
+  currentTime: number;
+  duration: number;
+  isPlaying: boolean;
+  playbackRate: number;
+  onTogglePlay: () => void;
+  onTogglePlaybackRate: () => void;
+  onStartStep: (multiplier: number) => void;
+  onStopStep: () => void;
+  onScrub: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onScrubStart: () => void;
+  onScrubEnd: () => void;
+  formatSeconds: (s: number) => string;
+}
+
+const VideoControls = memo(({
+  currentTime, duration, isPlaying, playbackRate,
+  onTogglePlay, onTogglePlaybackRate, onStartStep, onStopStep,
+  onScrub, onScrubStart, onScrubEnd, formatSeconds
+}: VideoControlsProps) => {
+  return (
+    <div className="absolute bottom-10 inset-x-0 z-40 px-6 pointer-events-none">
+      <div className="max-w-3xl mx-auto w-full flex flex-col gap-3 pointer-events-auto bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 shadow-2xl">
+        {/* Row 1: Controls */}
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center gap-4">
+            <button 
+              onPointerDown={() => onStartStep(-1)}
+              onPointerUp={onStopStep}
+              onPointerLeave={onStopStep}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
+              title="Previous Frame"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            
+            <button 
+              onClick={onTogglePlay} 
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
+            >
+              {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
+            </button>
+
+            <button 
+              onPointerDown={() => onStartStep(1)}
+              onPointerUp={onStopStep}
+              onPointerLeave={onStopStep}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
+              title="Next Frame"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+
+          <button 
+            onClick={onTogglePlaybackRate} 
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all active:scale-90 border ml-8 ${playbackRate === 0.25 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white/50 border-white/10 text-gray-300'}`}
+          >
+            <Gauge className="w-4 h-4" />
+            <span className="text-xs font-bold">{playbackRate === 1 ? '1x' : '0.25x'}</span>
+          </button>
+        </div>
+
+        {/* Row 2: Progress */}
+        <div className="w-full flex items-center gap-3">
+          <div className="flex-1 flex items-center group relative h-6">
+            <input 
+              type="range"
+              min="0"
+              max={duration || 0}
+              step="0.001"
+              value={currentTime}
+              onChange={onScrub}
+              onMouseDown={onScrubStart}
+              onMouseUp={onScrubEnd}
+              onTouchStart={onScrubStart}
+              onTouchEnd={onScrubEnd}
+              className="w-full h-1.5 bg-gray-600 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all focus:outline-none"
+            />
+            {/* Custom Progress Bar background to show "filled" portion */}
+            <div 
+              className="absolute left-0 top-[10px] h-1.5 bg-blue-500 rounded-full pointer-events-none"
+              style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+            />
+          </div>
+          
+          <span className="text-[10px] font-mono text-gray-300 w-16 text-right">
+            {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+});
+VideoControls.displayName = 'VideoControls';
+
+// --- MAIN COMPONENT ---
 
 export default function Home() {
   // App states: 'camera' | 'processing' | 'gallery' | 'history'
   const [appState, setAppState] = useState<'camera' | 'processing' | 'gallery' | 'history'>('camera');
   const [showIntro, setShowIntro] = useState<boolean>(true);
+  const [recordingTime, setRecordingTime] = useState(0); // Seconds elapsed
+  const frameRateRef = useRef(30); // Default to 30fps
 
   // Persisted voices for Speech Synthesis
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+
+  useEffect(() => {
+    // On iOS Safari 16.4+, set the audio session type based on app mode.
+    // 'ambient'        — respects the hardware mute switch, but blocks audio capture.
+    // 'play-and-record'— allows microphone access, but ignores the mute switch.
+    // We use 'play-and-record' on the camera screen so the mic works, and switch
+    // to 'ambient' in gallery/review so sounds respect the mute switch.
+    if (!('audioSession' in navigator)) return;
+    (navigator as any).audioSession.type =
+      appState === 'camera' ? 'play-and-record' : 'ambient';
+  }, [appState]);
 
   useEffect(() => {
     const loadVoices = () => {
@@ -151,6 +408,40 @@ export default function Home() {
     });
   };
 
+  const playPowerDownSound = () => {
+    try {
+      if (!playbackAudioContextRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        playbackAudioContextRef.current = new AudioContextClass();
+      }
+      const ctx = playbackAudioContextRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const t = ctx.currentTime;
+      const notes = [196.00, 164.81, 130.81]; // G3, E3, C3
+      
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, t + (i * 0.15));
+        
+        gain.gain.setValueAtTime(0, t + (i * 0.15));
+        gain.gain.linearRampToValueAtTime(0.1, t + (i * 0.15) + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + (i * 0.15) + 0.2);
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(t + (i * 0.15));
+        osc.stop(t + (i * 0.15) + 0.2);
+      });
+    } catch (e) {
+      // Ignore
+    }
+  };
+
   // Processing
   const [progressText, setProgressText] = useState('');
   const [isBurning, setIsBurning] = useState(false);
@@ -170,6 +461,26 @@ export default function Home() {
   const [shotNotes, setShotNotes] = useState<string[]>([]);
   const [showNotes, setShowNotes] = useState(false);
   const [favorites, setFavorites] = useState<boolean[]>([]);
+  const [clipByteSizes, setClipByteSizes] = useState<(number | null)[]>([]);
+  const holdStepCountRef = useRef(0);
+
+  // Recording Timer & Limits
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isRecording) {
+      setRecordingTime(0);
+      interval = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isRecording]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Drawing Tool State
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -344,6 +655,9 @@ export default function Home() {
   const mainVideoRef = useRef<HTMLVideoElement>(null);
   const stepFrameRequestRef = useRef<number | null>(null);
   const stepDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const continuousStepActiveRef = useRef(false);
+  const isSteppingRef = useRef(false);
+  const selectedClipIndexRef = useRef<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -371,47 +685,143 @@ export default function Home() {
 
   const stepFrame = (delta: number) => {
     if (mainVideoRef.current) {
-      mainVideoRef.current.pause();
-      const newTime = Math.max(0, Math.min(duration, mainVideoRef.current.currentTime + delta));
-      mainVideoRef.current.currentTime = newTime;
+      const video = mainVideoRef.current;
+      video.pause();
+      const newTime = Math.max(0, Math.min(duration, video.currentTime + delta));
+      video.currentTime = newTime;
       setCurrentTime(newTime);
-
-      // 1. Audio "Tick" (Universal)
       playTickSound();
-
-      // 2. Haptic Feedback (Android/Chrome)
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(5); 
-      }
     }
   };
 
-  const startContinuousStep = (delta: number) => {
-    // 1. Step once immediately (The Tap)
-    stepFrame(delta);
+  const startContinuousStep = (direction: number) => {
+    const delta = direction / frameRateRef.current;
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const hasRVFC = typeof (mainVideoRef.current as any)?.requestVideoFrameCallback === 'function';
 
-    // 2. Clear any existing timers
+    // Advance one frame using requestVideoFrameCallback — no currentTime seek,
+    // so the MediaCodec decoder pipeline is never flushed. Completes in ~16-33ms
+    // regardless of decoder warmup state. Forward only; backward must still seek.
+    const stepViaRVFC = (video: HTMLVideoElement): Promise<void> => {
+      if (video.ended || video.currentTime >= video.duration - 0.05) return Promise.resolve();
+      const startMediaTime = video.currentTime;
+      isSteppingRef.current = true;
+      return new Promise<void>(resolve => {
+        video.play().catch(() => {});
+        const cb = (_: number, meta: { mediaTime: number }) => {
+          if (meta.mediaTime > startMediaTime + 0.005) {
+            video.pause();
+            isSteppingRef.current = false;
+            setCurrentTime(video.currentTime);
+            resolve();
+          } else {
+            (video as any).requestVideoFrameCallback(cb);
+          }
+        };
+        (video as any).requestVideoFrameCallback(cb);
+      });
+    };
+
+    // 1. Step once immediately (The Tap)
+    if (isAndroid && delta > 0 && hasRVFC) {
+      playTickSound();
+      stepViaRVFC(mainVideoRef.current!); // fire-and-forget; resolves in ~33ms
+    } else {
+      stepFrame(delta);
+    }
+
+    // 2. Clear any existing state
+    continuousStepActiveRef.current = false;
     if (stepDelayTimeoutRef.current) clearTimeout(stepDelayTimeoutRef.current);
     if (stepFrameRequestRef.current) cancelAnimationFrame(stepFrameRequestRef.current);
 
-    // 3. Set a delay before starting the continuous loop (The Hold)
+    // 3. Hold loop — platform-specific to handle decoder differences:
+    //
+    // Android forward: RVFC-driven. The browser naturally advances the decoder
+    //   one frame per step — no flush, no cold-start penalty.
+    // Android backward: seeked-event-driven (RVFC can't go backward).
+    // Mac/iOS: time-based rAF loop at exactly 10fps.
     stepDelayTimeoutRef.current = setTimeout(() => {
-      let lastStepTime = 0;
-      const loop = (timestamp: number) => {
-        if (!lastStepTime) lastStepTime = timestamp;
-        const elapsed = timestamp - lastStepTime;
+      if (!mainVideoRef.current) return;
+      continuousStepActiveRef.current = true;
 
-        if (elapsed > 100) { // 10 FPS (one step every 100ms)
-          stepFrame(delta);
-          lastStepTime = timestamp;
-        }
+      const HOLD_STEP_FPS = 8; // Max frame-step rate while holding
+      const STEP_INTERVAL_MS = Math.round(1000 / HOLD_STEP_FPS);
+
+      if (isAndroid && delta > 0 && hasRVFC) {
+        const runRVFCLoop = async () => {
+          while (continuousStepActiveRef.current && mainVideoRef.current) {
+            const video = mainVideoRef.current;
+            if (video.ended || video.currentTime >= video.duration - 0.05) break;
+
+            // Fire the tick at the top of the iteration so the audio metronome
+            // is driven by the loop clock, not by RVFC resolution time.
+            playTickSound();
+
+            const stepStart = performance.now();
+            await stepViaRVFC(video);
+            const elapsed = performance.now() - stepStart;
+
+            // Hard floor: never start the next step sooner than STEP_INTERVAL_MS
+            // from when this one started.
+            if (elapsed < STEP_INTERVAL_MS) {
+              await new Promise<void>(resolve => setTimeout(resolve, STEP_INTERVAL_MS - elapsed));
+            }
+
+            if (!continuousStepActiveRef.current) return;
+          }
+        };
+        runRVFCLoop();
+      } else if (isAndroid) {
+        // Backward on Android: seeked-event-driven (no RVFC for reverse)
+        const runSeekLoop = async () => {
+          while (continuousStepActiveRef.current && mainVideoRef.current) {
+            const stepStart = performance.now();
+            stepFrame(delta);
+
+            await new Promise<void>(resolve => {
+              mainVideoRef.current!.addEventListener('seeked', () => resolve(), { once: true });
+            });
+
+            if (!continuousStepActiveRef.current) return;
+
+            const elapsed = performance.now() - stepStart;
+            if (elapsed < STEP_INTERVAL_MS) {
+              await new Promise<void>(resolve => setTimeout(resolve, STEP_INTERVAL_MS - elapsed));
+            }
+          }
+        };
+        runSeekLoop();
+      } else {
+        // Mac / iOS: time-based rAF, track targetTime independently of seek speed
+        let targetTime = mainVideoRef.current.currentTime;
+        let lastStepTime = performance.now();
+
+        const loop = (now: number) => {
+          if (!continuousStepActiveRef.current || !mainVideoRef.current) return;
+
+          if (now - lastStepTime >= STEP_INTERVAL_MS) {
+            lastStepTime = now;
+            targetTime = Math.max(0, Math.min(duration, targetTime + delta));
+            mainVideoRef.current.pause();
+            mainVideoRef.current.currentTime = targetTime;
+            setCurrentTime(targetTime);
+            playTickSound();
+          }
+
+          stepFrameRequestRef.current = requestAnimationFrame(loop);
+        };
+
         stepFrameRequestRef.current = requestAnimationFrame(loop);
-      };
-      stepFrameRequestRef.current = requestAnimationFrame(loop);
+      }
     }, 250); // Wait 250ms of holding before "running"
   };
 
   const stopContinuousStep = () => {
+    continuousStepActiveRef.current = false;
+    isSteppingRef.current = false;
+    // Pause immediately in case an RVFC play() is still in flight
+    if (mainVideoRef.current) mainVideoRef.current.pause();
     if (stepDelayTimeoutRef.current) {
       clearTimeout(stepDelayTimeoutRef.current);
       stepDelayTimeoutRef.current = null;
@@ -424,6 +834,7 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
+      continuousStepActiveRef.current = false;
       if (stepDelayTimeoutRef.current) clearTimeout(stepDelayTimeoutRef.current);
       if (stepFrameRequestRef.current) cancelAnimationFrame(stepFrameRequestRef.current);
     };
@@ -465,6 +876,7 @@ export default function Home() {
   };
 
   useEffect(() => {
+    selectedClipIndexRef.current = selectedClipIndex;
     if (selectedClipIndex !== null) {
       setIsPlaying(true);
       setCurrentTime(0);
@@ -592,72 +1004,79 @@ export default function Home() {
   };
 
   const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob, thumbnailData?: Uint8Array) => {
-    try {
-      const allSessions = await getAllSessions();
-      const currentSession = allSessions.find(s => s.id === sessionId);
-      if (!currentSession) return;
+    // Add to sequential queue to prevent overlapping DB transactions
+    dbQueue = dbQueue.then(async () => {
+      try {
+        const currentSession = await getSession(sessionId);
+        if (!currentSession) return;
 
-      const arrayBuffer = await videoBlob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      
-      // Convert raw JPEG bytes to Base64 for stable storage
-      let thumbnailBase64 = '';
-      if (thumbnailData) {
-        // Use a more memory-efficient way to convert Uint8Array to base64
-        const binary = Array.from(thumbnailData).map(b => String.fromCharCode(b)).join('');
-        thumbnailBase64 = `data:image/jpeg;base64,${window.btoa(binary)}`;
+        const arrayBuffer = await videoBlob.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        
+        let thumbnailBase64 = '';
+        if (thumbnailData) {
+          const binary = Array.from(thumbnailData).map(b => String.fromCharCode(b)).join('');
+          thumbnailBase64 = `data:image/jpeg;base64,${window.btoa(binary)}`;
+        }
+
+        const updatedClips = [...currentSession.clips];
+        updatedClips[index] = {
+          ...updatedClips[index],
+          data: uint8Array,
+          thumbnail: thumbnailBase64 || updatedClips[index]?.thumbnail || ''
+        };
+
+        const updatedSession: Session = {
+          ...currentSession,
+          clips: updatedClips
+        };
+        await saveSession(updatedSession);
+        
+        // Update UI state for thumbnails if we got a new one
+        if (thumbnailBase64) {
+          setThumbnails(prev => {
+            const next = [...prev];
+            next[index] = thumbnailBase64;
+            return next;
+          });
+        }
+      } catch (err) {
+        console.error("Error persisting incremental clip:", err);
+        // On mobile Safari, an "Internal Error" often means we need to wait and let 
+        // the connection pool clear before trying anything else.
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
-
-      const updatedClips = [...currentSession.clips];
-      updatedClips[index] = {
-        ...updatedClips[index],
-        data: uint8Array,
-        thumbnail: thumbnailBase64
-      };
-
-      const updatedSession: Session = {
-        ...currentSession,
-        clips: updatedClips
-      };
-      await saveSession(updatedSession);
-      
-      // Update UI state
-      if (thumbnailBase64) {
-        setThumbnails(prev => {
-          const next = [...prev];
-          next[index] = thumbnailBase64;
-          return next;
-        });
-      }
-
-      await loadHistory(); // Refresh history list
-    } catch (err) {
-      console.error("Error persisting incremental clip:", err);
-    }
+    });
+    
+    return dbQueue;
   };
 
   const updateNotesInDB = useCallback(async () => {
     if (currentSessionId === null) return;
-    try {
-      // Find session to get its existing blobs
-      const allSessions = await getAllSessions();
-      const currentSession = allSessions.find(s => s.id === currentSessionId);
-      if (!currentSession) return;
+    
+    // Add to sequential queue
+    dbQueue = dbQueue.then(async () => {
+      try {
+        const currentSession = await getSession(currentSessionId);
+        if (!currentSession) return;
 
-      const updatedSession: Session = {
-        ...currentSession,
-        sessionName,
-        sessionNotes,
-        clips: currentSession.clips.map((clip, idx) => ({
-          ...clip,
-          shotNote: shotNotes[idx] || '',
-          isFavorite: favorites[idx] || false
-        }))
-      };
-      await saveSession(updatedSession);
-    } catch (err) {
-      console.error("Error updating notes in DB:", err);
-    }
+        const updatedSession: Session = {
+          ...currentSession,
+          sessionName,
+          sessionNotes,
+          clips: currentSession.clips.map((clip, idx) => ({
+            ...clip,
+            shotNote: shotNotes[idx] || '',
+            isFavorite: favorites[idx] || false
+          }))
+        };
+        await saveSession(updatedSession);
+      } catch (err) {
+        console.error("Error updating notes in DB:", err);
+      }
+    });
+    
+    return dbQueue;
   }, [currentSessionId, sessionName, sessionNotes, shotNotes, favorites]);
 
   // Debounce note syncing
@@ -671,16 +1090,16 @@ export default function Home() {
   const loadSession = (session: Session) => {
     // Clear old URLs
     clips.forEach(url => { if (url) URL.revokeObjectURL(url); });
-    
+
     const newUrls = session.clips.map(c => URL.createObjectURL(new Blob([c.data as any], { type: 'video/mp4' })));
     const newThumbnails = session.clips.map(c => c.thumbnail || null);
     const newShotNotes = session.clips.map(c => c.shotNote);
     const newFavorites = session.clips.map(c => c.isFavorite || false);
-    
     setClips(newUrls);
     setThumbnails(newThumbnails);
     setShotNotes(newShotNotes);
     setFavorites(newFavorites);
+    setClipByteSizes(session.clips.map(c => c.data.byteLength > 0 ? c.data.byteLength : null));
     setSessionName(session.sessionName || '');
     setSessionNotes(session.sessionNotes);
     setCurrentSessionId(session.id);
@@ -706,8 +1125,18 @@ export default function Home() {
     try {
       const constraints: MediaStreamConstraints = {
         video: selectedDeviceId 
-          ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          ? { 
+              deviceId: { exact: selectedDeviceId }, 
+              width: { ideal: 1280 }, 
+              height: { ideal: 720 },
+              frameRate: USE_HIGH_FRAMERATE ? { ideal: 60 } : { ideal: 30 }
+            }
+          : { 
+              facingMode: 'environment', 
+              width: { ideal: 1280 }, 
+              height: { ideal: 720 },
+              frameRate: USE_HIGH_FRAMERATE ? { ideal: 60 } : { ideal: 30 }
+            },
         audio: true
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -719,6 +1148,16 @@ export default function Home() {
       setZoomLevel(1);
       
       const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings();
+      
+      // Detect actual achieved frame rate
+      if (settings.frameRate) {
+        frameRateRef.current = settings.frameRate;
+        console.log(`Camera active: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
+      } else {
+        frameRateRef.current = 30; // Fallback
+      }
+
       const capabilities = track.getCapabilities && track.getCapabilities() as any;
       if (capabilities && capabilities.zoom) {
         setMaxZoom(capabilities.zoom.max);
@@ -925,6 +1364,7 @@ export default function Home() {
         setThumbnails(new Array(impacts.length).fill(null));
         setShotNotes(initialNotes);
         setFavorites(initialFavorites);
+        setClipByteSizes(new Array(impacts.length).fill(null));
         setAppState('gallery');
 
         // 2. Create the session in DB immediately with "empty" slots
@@ -947,17 +1387,30 @@ export default function Home() {
         await loadHistory();
 
         // 3. Process and update one-by-one (lightning fast now)
+        const processedUrls: (string | null)[] = new Array(impacts.length).fill(null);
         await processSwings(
-          fullVideoBlob, 
-          impacts, 
+          fullVideoBlob,
+          impacts,
           setProgressText,
           async (index, clipUrl, clipBlob, thumbnail) => {
+            processedUrls[index] = clipUrl;
             setClips(prev => {
               const next = [...prev];
               next[index] = clipUrl;
               return next;
             });
-            
+
+            // Convert raw thumbnail data to Base64 for immediate UI display if present
+            if (thumbnail) {
+              const binary = Array.from(thumbnail).map(b => String.fromCharCode(b)).join('');
+              const base64 = `data:image/jpeg;base64,${window.btoa(binary)}`;
+              setThumbnails(prev => {
+                const next = [...prev];
+                next[index] = base64;
+                return next;
+              });
+            }
+
             // Save each clip to DB as soon as it's ready
             await persistIncrementalClip(sessionId, index, clipBlob, thumbnail);
           }
@@ -977,21 +1430,39 @@ export default function Home() {
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
-      // Ensure context exists and is resumed during this user gesture for Safari
-      if (!playbackAudioContextRef.current) {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        playbackAudioContextRef.current = new AudioContextClass();
-      }
-      
-      if (playbackAudioContextRef.current.state === 'suspended') {
-        playbackAudioContextRef.current.resume();
-      }
+      // Notification sound for stopping
+      playPowerDownSound();
 
-      isRecordingRef.current = false;
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+      // Delay actual stop/transition so sound is heard
+      setTimeout(async () => {
+        if (!mediaRecorderRef.current) return;
+        
+        // Ensure context exists and is resumed during this user gesture for Safari
+        if (!playbackAudioContextRef.current) {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          playbackAudioContextRef.current = new AudioContextClass();
+        }
+        
+        if (playbackAudioContextRef.current.state === 'suspended') {
+          playbackAudioContextRef.current.resume();
+        }
+
+        isRecordingRef.current = false;
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+      }, 1000);
     }
   }, [isRecording]);
+
+  // Monitor Session Limits
+  useEffect(() => {
+    if (isRecording) {
+      if (shotCount >= MAX_SHOTS || recordingTime >= MAX_RECORDING_MINUTES * 60) {
+        // No need to play sound here, stopRecording handles it
+        stopRecording();
+      }
+    }
+  }, [shotCount, recordingTime, isRecording, stopRecording]);
 
   const dismissIntro = () => {
     setShowIntro(false);
@@ -1155,12 +1626,20 @@ export default function Home() {
             <br /><br />
             <span className="text-blue-400 font-semibold">Shots are detected by impact sound</span>, so this works best in an indoor or isolated setting.
           </p>
-          <button 
+          <button
             onClick={dismissIntro}
             className="w-full py-4 bg-white text-black font-bold text-lg rounded-xl shadow-lg active:scale-95 transition-transform"
           >
             Get Started
           </button>
+          {sessions.length > 0 && (
+            <button
+              onClick={() => { setShowIntro(false); setAppState('history'); }}
+              className="w-full py-4 mt-3 bg-transparent border border-gray-600 text-gray-300 font-semibold text-lg rounded-xl active:scale-95 transition-transform"
+            >
+              View History
+            </button>
+          )}
         </div>
       </main>
     );
@@ -1260,8 +1739,18 @@ export default function Home() {
                   />
                 </div>
 
-                <div className="bg-black/50 border border-white/20 backdrop-blur-md px-4 py-1.5 rounded-full shadow-xl">
-                  <span className="text-white font-bold text-lg">{shotCount} {shotCount === 1 ? 'Shot' : 'Shots'} Detected</span>
+                <div className="bg-black/50 border border-white/20 backdrop-blur-md px-6 py-3 rounded-2xl shadow-xl flex flex-col items-center gap-1">
+                  <div className="flex items-center gap-4">
+                    <div className="flex flex-col items-center">
+                      <span className="text-white font-black text-xl tabular-nums">{shotCount}<span className="text-gray-500 text-sm font-bold">/{MAX_SHOTS}</span></span>
+                      <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Shots</span>
+                    </div>
+                    <div className="w-px h-8 bg-white/10"></div>
+                    <div className="flex flex-col items-center">
+                      <span className="text-white font-black text-xl tabular-nums">{formatTime(recordingTime)}<span className="text-gray-500 text-sm font-bold">/{MAX_RECORDING_MINUTES}:00</span></span>
+                      <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Elapsed</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1278,53 +1767,12 @@ export default function Home() {
                <div><h1 className="text-lg font-bold text-white">History</h1><p className="text-xs text-gray-400">{sessions.length} sessions saved</p></div>
              </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {sessions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-                <History className="w-12 h-12 mb-4 opacity-20" />
-                <p>No saved sessions yet.</p>
-              </div>
-            ) : (
-              sessions.map((session) => (
-                <div key={session.id} onClick={() => loadSession(session)} className="bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg cursor-pointer hover:border-blue-500/50 transition-all active:scale-[0.98]">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-bold text-white">{session.sessionName || new Date(session.id).toLocaleDateString()}</h3>
-                      <p className="text-xs text-gray-500">{session.sessionName ? new Date(session.id).toLocaleDateString() + ' • ' : ''}{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
-                    </div>
-                    <button onClick={(e) => deleteHistorySession(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                  {session.sessionNotes && (
-                    <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">&quot;{session.sessionNotes}&quot;</p>
-                  )}
-                  <div className="flex gap-2 mt-3 overflow-hidden h-12">
-                    {session.clips.slice(0, 5).map((clip, idx) => (
-                      <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
-                        {clip.thumbnail ? (
-                          <img 
-                            src={clip.thumbnail} 
-                            className="w-full h-full object-cover" 
-                            alt={`Swing ${idx + 1}`}
-                          />
-                        ) : (
-                          <video 
-                            src={`${URL.createObjectURL(new Blob([clip.data as any], { type: 'video/mp4' }))}#t=2`} 
-                            className="w-full h-full object-cover" 
-                            muted 
-                            playsInline 
-                            preload="metadata" 
-                          />
-                        )}
-                      </div>
-                    ))}
-                    {session.clips.length > 5 && (
-                      <div className="h-full aspect-square bg-gray-800 rounded flex items-center justify-center text-[10px] font-bold text-gray-500">+{session.clips.length - 5}</div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          <HistoryList 
+            sessions={sessions} 
+            currentSessionId={currentSessionId} 
+            onLoad={loadSession} 
+            onDelete={deleteHistorySession} 
+          />
         </div>
       )}
 
@@ -1358,55 +1806,20 @@ export default function Home() {
                     <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[45px]" />
                  </div>
                </div>
-               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                 {clips.map((clipUrl, idx) => (
-                   <div key={idx} onClick={() => clipUrl && setSelectedClipIndex(idx)} className={`relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 transition-transform ${clipUrl ? 'cursor-pointer active:scale-95' : 'opacity-70'}`}>
-                     <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
-                       {clipUrl ? (
-                         <>
-                           {thumbnails[idx] ? (
-                             <img 
-                               src={thumbnails[idx] as string} 
-                               className="w-full h-full object-cover pointer-events-none" 
-                               alt={`Swing ${idx + 1}`}
-                             />
-                           ) : (
-                             <video 
-                               src={`${clipUrl}#t=2`}
-                               className="w-full h-full object-cover pointer-events-none" 
-                               muted 
-                               playsInline 
-                               preload="auto" 
-                             />
-                           )}
-                           {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
-                           <button 
-                             onClick={(e) => toggleFavorite(idx, e)}
-                             className="absolute top-2 left-2 p-1.5 bg-black/40 hover:bg-black/60 rounded-full backdrop-blur-md transition-all shadow-lg z-10"
-                           >
-                             <Star className={`w-4 h-4 ${favorites[idx] ? 'fill-white text-white' : 'text-white'}`} />
-                           </button>
-                         </>
-                       ) : (
-                         <div className="flex flex-col items-center text-center p-4">
-                           <Loader2 className="w-8 h-8 animate-spin text-blue-500 mb-2" />
-                           <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{progressText || 'Preparing...'}</span>
-                         </div>
-                       )}
-                     </div>
-                     <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
-                       <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
-                       {clipUrl && (
-                         <div className="flex gap-2">
-                           <button onClick={(e) => deleteClip(idx, e)} className="p-1.5 bg-gray-800 hover:bg-red-900/50 rounded-md text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
-                           <button onClick={(e) => { e.stopPropagation(); shareClip(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"><Share2 className="w-4 h-4" /></button>
-                           <button onClick={(e) => { e.stopPropagation(); downloadClip(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"><Download className="w-4 h-4" /></button>
-                         </div>
-                       )}
-                     </div>
-                   </div>
-                 ))}
-               </div>             </div>
+               <GalleryGrid
+                 clips={clips}
+                 thumbnails={thumbnails}
+                 shotNotes={shotNotes}
+                 favorites={favorites}
+                 clipByteSizes={clipByteSizes}
+                 progressText={progressText}
+                 onSelect={setSelectedClipIndex}
+                 onDelete={deleteClip}
+                 onShare={shareClip}
+                 onDownload={downloadClip}
+                 onToggleFavorite={toggleFavorite}
+               />
+             </div>
           </div>
 
           {selectedClipIndex !== null && (
@@ -1428,8 +1841,8 @@ export default function Home() {
                   playsInline 
                   onTimeUpdate={handleTimeUpdate}
                   onLoadedMetadata={handleLoadedMetadata}
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => setIsPlaying(false)}
+                  onPlay={() => { if (!isSteppingRef.current) setIsPlaying(true); }}
+                  onPause={() => { if (!isSteppingRef.current) setIsPlaying(false); }}
                   className="w-full h-full object-cover absolute inset-0 z-0" 
                 />
                 
@@ -1450,77 +1863,20 @@ export default function Home() {
                 />
 
                 {/* Custom Video Controls */}
-                <div className="absolute bottom-10 inset-x-0 z-40 px-6 pointer-events-none">
-                  <div className="max-w-3xl mx-auto w-full flex flex-col gap-3 pointer-events-auto bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 shadow-2xl">
-                    {/* Row 1: Controls */}
-                    <div className="flex items-center justify-between w-full">
-                      <div className="flex items-center gap-4">
-                        <button 
-                          onPointerDown={() => startContinuousStep(-1/60)}
-                          onPointerUp={stopContinuousStep}
-                          onPointerLeave={stopContinuousStep}
-                          className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
-                          title="Previous Frame"
-                        >
-                          <ChevronLeft className="w-5 h-5" />
-                        </button>
-                        
-                        <button 
-                          onClick={togglePlay} 
-                          className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
-                        >
-                          {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
-                        </button>
-
-                        <button 
-                          onPointerDown={() => startContinuousStep(1/60)}
-                          onPointerUp={stopContinuousStep}
-                          onPointerLeave={stopContinuousStep}
-                          className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
-                          title="Next Frame"
-                        >
-                          <ChevronRight className="w-5 h-5" />
-                        </button>
-                      </div>
-
-                      <button 
-                        onClick={togglePlaybackRate} 
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all active:scale-90 border ml-8 ${playbackRate === 0.25 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white/50 border-white/10 text-gray-300'}`}
-                      >
-                        <Gauge className="w-4 h-4" />
-                        <span className="text-xs font-bold">{playbackRate === 1 ? '1x' : '0.25x'}</span>
-                      </button>
-                    </div>
-
-                    {/* Row 2: Progress */}
-                    <div className="w-full flex items-center gap-3">
-                      <div className="flex-1 flex items-center group relative h-6">
-                        <input 
-                          type="range"
-                          min="0"
-                          max={duration || 0}
-                          step="0.001"
-                          value={currentTime}
-                          onChange={handleScrub}
-                          onMouseDown={handleScrubStart}
-                          onMouseUp={handleScrubEnd}
-                          onTouchStart={handleScrubStart}
-                          onTouchEnd={handleScrubEnd}
-                          className="w-full h-1.5 bg-gray-600 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all focus:outline-none"
-                        />
-                        {/* Custom Progress Bar background to show "filled" portion */}
-                        <div 
-                          className="absolute left-0 top-[10px] h-1.5 bg-blue-500 rounded-full pointer-events-none"
-                          style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                        />
-                      </div>
-                      
-                      <span className="text-[10px] font-mono text-gray-300 w-16 text-right">
-                        {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                <VideoControls 
+                  currentTime={currentTime}
+                  duration={duration}
+                  isPlaying={isPlaying}
+                  playbackRate={playbackRate}
+                  onTogglePlay={togglePlay}
+                  onTogglePlaybackRate={togglePlaybackRate}
+                  onStartStep={startContinuousStep}
+                  onStopStep={stopContinuousStep}
+                  onScrub={handleScrub}
+                  onScrubStart={handleScrubStart}
+                  onScrubEnd={handleScrubEnd}
+                  formatSeconds={(s) => s.toFixed(2)}
+                />
 
                 <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 flex items-center justify-between pointer-events-none z-40">
                   <button disabled={selectedClipIndex === 0} onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(selectedClipIndex - 1); }} className={`p-4 bg-black/50 rounded-full text-white pointer-events-auto backdrop-blur-md transition-all active:scale-90 ${selectedClipIndex === 0 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}><ChevronLeft className="w-8 h-8" /></button>
@@ -1531,7 +1887,16 @@ export default function Home() {
               {/* Header Overlay */}
               <div className="px-4 py-4 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent absolute top-0 inset-x-0 z-50 pointer-events-none">
                 <div className="flex flex-col text-white pointer-events-auto">
-                  <h2 className="text-base font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
+                    {clipByteSizes[selectedClipIndex] != null && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-black/60 text-gray-300">
+                        {clipByteSizes[selectedClipIndex]! < 1024 * 1024
+                          ? `${Math.round(clipByteSizes[selectedClipIndex]! / 1024)}KB`
+                          : `${(clipByteSizes[selectedClipIndex]! / (1024 * 1024)).toFixed(1)}MB`}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex gap-1.5 mt-1">
                     <button 
                       onClick={() => setDrawMode(drawMode === 'line' ? 'circle' : 'line')} 

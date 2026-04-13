@@ -4,8 +4,24 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 let ffmpeg: FFmpeg | null = null;
 let loadPromise: Promise<FFmpeg> | null = null;
 
+export async function resetFFmpeg() {
+  if (ffmpeg) {
+    try {
+      ffmpeg.terminate();
+    } catch (e) {
+      // Ignore termination errors
+    }
+    ffmpeg = null;
+    loadPromise = null;
+    
+    // Crucial for mobile stability: give the browser a moment 
+    // to actually kill the worker and free the memory handles.
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+}
+
 export async function initFFmpeg(onProgress: (msg: string) => void): Promise<FFmpeg> {
-  if (ffmpeg) return ffmpeg;
+  if (ffmpeg && (ffmpeg as any).isLoaded) return ffmpeg;
   if (loadPromise) return loadPromise;
 
   loadPromise = (async () => {
@@ -28,6 +44,7 @@ export async function initFFmpeg(onProgress: (msg: string) => void): Promise<FFm
       }
 
       await fm.load(loadOptions);
+      (fm as any).isLoaded = true;
       
       onProgress('Engine ready.');
       ffmpeg = fm;
@@ -65,7 +82,13 @@ export async function processSwings(
   const optimizedFileName = `optimized_${inputFileName}`;
   
   onProgress('Reading recorded session...');
-  await fm.writeFile(inputFileName, await fetchFile(videoBlob));
+  
+  // LOW MEMORY OPTIMIZATION:
+  // Instead of using fetchFile(videoBlob) which creates a temporary Uint8Array 
+  // that persists until GC, we manually handle the ArrayBuffer and null it out.
+  let fileData: Uint8Array | null = await fetchFile(videoBlob);
+  await fm.writeFile(inputFileName, fileData);
+  fileData = null; // Explicitly free memory reference
 
   let activeInputFile = inputFileName;
 
@@ -86,9 +109,30 @@ export async function processSwings(
     }
   }
 
-  const clipResults: {url: string, blob: Blob, thumbnail?: Uint8Array}[] = [];
-  
+  let activeFm = await initFFmpeg(onProgress);
+
+  // Process one by one and release memory immediately via onClipReady
   for (let i = 0; i < impacts.length; i++) {
+    // FRESH ENGINE STRATEGY:
+    // Every 10 clips, completely reset FFmpeg to flush WASM memory.
+    if (i > 0 && i % 10 === 0) {
+      onProgress(`Refreshing video engine (clip ${i + 1})...`);
+      await resetFFmpeg();
+      activeFm = await initFFmpeg(onProgress);
+      
+      // Re-write the input file to the new engine's filesystem
+      let fileData: Uint8Array | null = await fetchFile(videoBlob);
+      await activeFm.writeFile(inputFileName, fileData);
+      fileData = null;
+
+      if (isIOS) {
+        // Must re-run the faststart fix for the new engine
+        await activeFm.exec(['-i', inputFileName, '-c', 'copy', '-movflags', '+faststart', optimizedFileName]);
+        await activeFm.deleteFile(inputFileName);
+      }
+    }
+
+    const fm = activeFm;
     const impactTime = impacts[i];
     const startTime = Math.max(0, impactTime - 2); 
     const duration = 4; 
@@ -98,7 +142,6 @@ export async function processSwings(
     try {
       if (isIOS) {
         // iOS: FAST COPY PASS + FAST THUMBNAIL
-        // Since we "fixed" the video above with faststart, we can now use -c copy!
         await fm.exec([
           '-ss', startTime.toString(), 
           '-i', activeInputFile, 
@@ -111,7 +154,6 @@ export async function processSwings(
         const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
         const url = URL.createObjectURL(clipBlob);
 
-        // Separate pass for thumbnail to ensure stability on iOS
         await fm.exec([
           '-ss', (startTime + 2).toString(),
           '-i', activeInputFile,
@@ -124,18 +166,16 @@ export async function processSwings(
         const thumbData = await fm.readFile(thumbFileName);
         const thumbnail = new Uint8Array(thumbData as any);
         
-        clipResults.push({url, blob: clipBlob, thumbnail});
         if (onClipReady) onClipReady(i, url, clipBlob, thumbnail);
         
         await fm.deleteFile(outputFileName);
         await fm.deleteFile(thumbFileName);
       } else {
         // Android/Desktop: SUPER FAST SINGLE PASS + FAST THUMBNAIL
-        // Use stream copy (-c copy) for the video (near-instant)
         await fm.exec([
-          '-ss', startTime.toString(), 
-          '-i', activeInputFile, 
-          '-t', duration.toString(), 
+          '-ss', startTime.toString(),
+          '-i', activeInputFile,
+          '-t', duration.toString(),
           '-c', 'copy',
           outputFileName
         ]);
@@ -144,7 +184,6 @@ export async function processSwings(
         const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
         const url = URL.createObjectURL(clipBlob);
 
-        // Fast thumbnail extraction (near-instant)
         await fm.exec([
           '-ss', (startTime + 2).toString(),
           '-i', activeInputFile,
@@ -157,7 +196,6 @@ export async function processSwings(
         const thumbData = await fm.readFile(thumbFileName);
         const thumbnail = new Uint8Array(thumbData as any);
 
-        clipResults.push({url, blob: clipBlob, thumbnail});
         if (onClipReady) onClipReady(i, url, clipBlob, thumbnail);
         
         await fm.deleteFile(outputFileName);
@@ -169,8 +207,12 @@ export async function processSwings(
   }
   
   onProgress('Finalizing gallery...');
-  await fm.deleteFile(activeInputFile);
-  return clipResults;
+  try {
+    await activeFm.deleteFile(activeInputFile);
+  } catch (e) {
+    // Ignore cleanup errors at the very end
+  }
+  return [];
 }
 
 export async function burnLinesToVideo(
