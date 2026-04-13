@@ -910,37 +910,6 @@ export default function Home() {
       const impacts = impactTimesRef.current;
       recordingStartTimeRef.current = 0;
 
-      // Announce count safely to prevent cut-offs on Android/mobile
-      window.speechSynthesis.cancel(); // Clear any hung queues
-      const count = impacts.length;
-
-      const utterance = new SpeechSynthesisUtterance(`${count} shot${count !== 1 ? 's' : ''} detected`);
-      (window as any).__currentUtterance = utterance; // Global ref to prevent GC
-
-      const voices = voicesRef.current;
-      const preferredVoice = voices.find(v => v.name.includes('Siri') || v.name.includes('Samantha') || v.name.includes('Google US English'))
-                          || voices.find(v => v.lang.startsWith('en-US'))
-                          || voices.find(v => v.lang.startsWith('en'));
-
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
-      }
-      utterance.rate = 0.95;
-
-      // Create a promise that resolves when the voice FINISHES speaking
-      const speechFinished = new Promise((resolve) => {
-        utterance.onend = () => resolve(true);
-        utterance.onerror = () => resolve(true);
-        // Fallback: if voice hasn't finished in 4 seconds, just proceed anyway
-        setTimeout(() => resolve(true), 4000);
-      });
-
-      // Small delay on Android specifically to ensure the 'cancel' is fully processed
-      // and the UI transition has settled before speaking.
-      setTimeout(() => {
-        window.speechSynthesis.speak(utterance);
-      }, 300);
-
       const fullVideoBlob = new Blob(chunks, { type: mediaRecorder.mimeType });      
       try {
         if (impacts.length === 0) {
@@ -949,24 +918,20 @@ export default function Home() {
           return;
         }
 
-        // Wait for the voice to finish (or timeout) before starting heavy CPU work
-        await speechFinished;
-
-        // Instant UI transition with placeholders
-        setClips(new Array(impacts.length).fill(null));
-        setThumbnails(new Array(impacts.length).fill(null));
+        // 1. Instant UI transition to gallery with placeholders
         const initialNotes = new Array(impacts.length).fill('');
         const initialFavorites = new Array(impacts.length).fill(false);
+        setClips(new Array(impacts.length).fill(null));
+        setThumbnails(new Array(impacts.length).fill(null));
         setShotNotes(initialNotes);
         setFavorites(initialFavorites);
         setAppState('gallery');
 
-        // 1. Create the session in DB immediately with "empty" slots
-        // This ensures the session exists even if the browser is closed mid-process
+        // 2. Create the session in DB immediately with "empty" slots
         const sessionId = Date.now();
         setCurrentSessionId(sessionId);
         const placeholderClips = initialNotes.map(() => ({
-          data: new Uint8Array(0), // Temporary empty data
+          data: new Uint8Array(0),
           shotNote: '',
           isFavorite: false
         }));
@@ -981,7 +946,7 @@ export default function Home() {
         await saveSession(newSession);
         await loadHistory();
 
-        // 2. Process and update one-by-one
+        // 3. Process and update one-by-one (lightning fast now)
         await processSwings(
           fullVideoBlob, 
           impacts, 
@@ -1025,10 +990,6 @@ export default function Home() {
       isRecordingRef.current = false;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      
-      // Immediate UI feedback
-      setAppState('processing');
-      setProgressText('Saving recording...');
     }
   }, [isRecording]);
 

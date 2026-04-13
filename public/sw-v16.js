@@ -1,0 +1,74 @@
+const CACHE_NAME = 'swingclips-cache-v16';
+const PRE_CACHE = [
+  '/',
+  '/manifest.json',
+  '/favicon.png',
+  '/gg-logo-square.png',
+  '/ffmpeg/ffmpeg-core.js',
+  '/ffmpeg/ffmpeg-core.wasm',
+  '/ffmpeg/ffmpeg-core.worker.js'
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRE_CACHE))
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((name) => {
+          if (name !== CACHE_NAME) {
+            return caches.delete(name);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  
+  // COMPLETELY IGNORE Next.js internal resources and HMR in development
+  if (url.pathname.startsWith('/_next/') || url.pathname.includes('webpack-hmr')) {
+    return;
+  }
+
+  // Custom caching for FFMPEG assets
+  if (url.pathname.includes('/ffmpeg/')) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        return cached || fetch(event.request).then((response) => {
+          if (!response || response.status !== 200) {
+            return response;
+          }
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+          return response;
+        });
+      })
+    );
+    return;
+  }
+  
+  // Generic response to satisfy Chrome's PWA install criteria
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return caches.match('/');
+      })
+    );
+  } else {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        return cached || fetch(event.request);
+      })
+    );
+  }
+});
