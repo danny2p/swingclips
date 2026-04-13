@@ -96,28 +96,73 @@ export async function processSwings(
     const thumbFileName = `thumb_${i}.jpg`;
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     try {
-      // COMBINED FAST PASS: Slice video and extract impact frame (2s into clip) in one go
-      await fm.exec([
-        '-ss', startTime.toString(), 
-        '-i', activeInputFile, 
-        '-t', duration.toString(),
-        '-filter_complex', '[0:v]split=2[v1][v2]',
-        '-map', '[v1]', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-g', '5', '-threads', '0', '-movflags', '+faststart', '-c:a', 'aac', '-b:a', '128k', outputFileName,
-        '-map', '[v2]', '-ss', '2', '-vframes', '1', '-f', 'image2', thumbFileName
-      ]);
+      if (isIOS) {
+        // iOS: FAST COPY PASS + FAST THUMBNAIL
+        // Since we "fixed" the video above with faststart, we can now use -c copy!
+        await fm.exec([
+          '-ss', startTime.toString(), 
+          '-i', activeInputFile, 
+          '-t', duration.toString(),
+          '-c', 'copy',
+          outputFileName
+        ]);
 
-      const data = await fm.readFile(outputFileName);
-      const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
-      const url = URL.createObjectURL(clipBlob);
+        const data = await fm.readFile(outputFileName);
+        const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
+        const url = URL.createObjectURL(clipBlob);
 
-      const thumbData = await fm.readFile(thumbFileName);
-      const thumbnail = new Uint8Array(thumbData as any);
-      
-      clipResults.push({url, blob: clipBlob, thumbnail});
-      if (onClipReady) onClipReady(i, url, clipBlob, thumbnail);
-      
-      await fm.deleteFile(outputFileName);
-      await fm.deleteFile(thumbFileName);
+        // Separate pass for thumbnail to ensure stability on iOS
+        await fm.exec([
+          '-ss', (startTime + 2).toString(),
+          '-i', activeInputFile,
+          '-vframes', '1',
+          '-q:v', '4',
+          '-f', 'image2',
+          thumbFileName
+        ]);
+
+        const thumbData = await fm.readFile(thumbFileName);
+        const thumbnail = new Uint8Array(thumbData as any);
+        
+        clipResults.push({url, blob: clipBlob, thumbnail});
+        if (onClipReady) onClipReady(i, url, clipBlob, thumbnail);
+        
+        await fm.deleteFile(outputFileName);
+        await fm.deleteFile(thumbFileName);
+      } else {
+        // Android/Desktop: SUPER FAST SINGLE PASS + FAST THUMBNAIL
+        // Use stream copy (-c copy) for the video (near-instant)
+        await fm.exec([
+          '-ss', startTime.toString(), 
+          '-i', activeInputFile, 
+          '-t', duration.toString(), 
+          '-c', 'copy',
+          outputFileName
+        ]);
+
+        const data = await fm.readFile(outputFileName);
+        const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
+        const url = URL.createObjectURL(clipBlob);
+
+        // Fast thumbnail extraction (near-instant)
+        await fm.exec([
+          '-ss', (startTime + 2).toString(),
+          '-i', activeInputFile,
+          '-vframes', '1',
+          '-q:v', '4',
+          '-f', 'image2',
+          thumbFileName
+        ]);
+
+        const thumbData = await fm.readFile(thumbFileName);
+        const thumbnail = new Uint8Array(thumbData as any);
+
+        clipResults.push({url, blob: clipBlob, thumbnail});
+        if (onClipReady) onClipReady(i, url, clipBlob, thumbnail);
+        
+        await fm.deleteFile(outputFileName);
+        await fm.deleteFile(thumbFileName);
+      }
     } catch (err) {
       onProgress(`Error on swing ${i + 1}...`);
     }

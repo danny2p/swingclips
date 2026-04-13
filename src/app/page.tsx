@@ -1346,9 +1346,13 @@ export default function Home() {
                             alt={`Swing ${idx + 1}`}
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-gray-800">
-                            <Video className="w-4 h-4 text-gray-600" />
-                          </div>
+                          <video 
+                            src={`${URL.createObjectURL(new Blob([clip.data as any], { type: 'video/mp4' }))}#t=2`} 
+                            className="w-full h-full object-cover" 
+                            muted 
+                            playsInline 
+                            preload="metadata" 
+                          />
                         )}
                       </div>
                     ))}
