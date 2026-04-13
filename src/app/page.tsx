@@ -9,10 +9,15 @@ import JSZip from 'jszip';
 // Sequential DB queue to prevent overlapping transactions and data corruption on mobile
 let dbQueue = Promise.resolve();
 
+// Session Limits
+const MAX_RECORDING_MINUTES = 5;
+const MAX_SHOTS = 30;
+
 export default function Home() {
   // App states: 'camera' | 'processing' | 'gallery' | 'history'
   const [appState, setAppState] = useState<'camera' | 'processing' | 'gallery' | 'history'>('camera');
   const [showIntro, setShowIntro] = useState<boolean>(true);
+  const [recordingTime, setRecordingTime] = useState(0); // Seconds elapsed
 
   // Persisted voices for Speech Synthesis
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
@@ -154,6 +159,40 @@ export default function Home() {
     });
   };
 
+  const playPowerDownSound = () => {
+    try {
+      if (!playbackAudioContextRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        playbackAudioContextRef.current = new AudioContextClass();
+      }
+      const ctx = playbackAudioContextRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const t = ctx.currentTime;
+      const notes = [196.00, 164.81, 130.81]; // G3, E3, C3
+      
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, t + (i * 0.15));
+        
+        gain.gain.setValueAtTime(0, t + (i * 0.15));
+        gain.gain.linearRampToValueAtTime(0.1, t + (i * 0.15) + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + (i * 0.15) + 0.2);
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(t + (i * 0.15));
+        osc.stop(t + (i * 0.15) + 0.2);
+      });
+    } catch (e) {
+      // Ignore
+    }
+  };
+
   // Processing
   const [progressText, setProgressText] = useState('');
   const [isBurning, setIsBurning] = useState(false);
@@ -173,6 +212,24 @@ export default function Home() {
   const [shotNotes, setShotNotes] = useState<string[]>([]);
   const [showNotes, setShowNotes] = useState(false);
   const [favorites, setFavorites] = useState<boolean[]>([]);
+
+  // Recording Timer & Limits
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isRecording) {
+      setRecordingTime(0);
+      interval = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isRecording]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Drawing Tool State
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -633,6 +690,9 @@ export default function Home() {
         }
       } catch (err) {
         console.error("Error persisting incremental clip:", err);
+        // On mobile Safari, an "Internal Error" often means we need to wait and let 
+        // the connection pool clear before trying anything else.
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     });
     
@@ -995,21 +1055,39 @@ export default function Home() {
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
-      // Ensure context exists and is resumed during this user gesture for Safari
-      if (!playbackAudioContextRef.current) {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        playbackAudioContextRef.current = new AudioContextClass();
-      }
-      
-      if (playbackAudioContextRef.current.state === 'suspended') {
-        playbackAudioContextRef.current.resume();
-      }
+      // Notification sound for stopping
+      playPowerDownSound();
 
-      isRecordingRef.current = false;
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+      // Delay actual stop/transition so sound is heard
+      setTimeout(async () => {
+        if (!mediaRecorderRef.current) return;
+        
+        // Ensure context exists and is resumed during this user gesture for Safari
+        if (!playbackAudioContextRef.current) {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          playbackAudioContextRef.current = new AudioContextClass();
+        }
+        
+        if (playbackAudioContextRef.current.state === 'suspended') {
+          playbackAudioContextRef.current.resume();
+        }
+
+        isRecordingRef.current = false;
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+      }, 1000);
     }
   }, [isRecording]);
+
+  // Monitor Session Limits
+  useEffect(() => {
+    if (isRecording) {
+      if (shotCount >= MAX_SHOTS || recordingTime >= MAX_RECORDING_MINUTES * 60) {
+        // No need to play sound here, stopRecording handles it
+        stopRecording();
+      }
+    }
+  }, [shotCount, recordingTime, isRecording, stopRecording]);
 
   const dismissIntro = () => {
     setShowIntro(false);
@@ -1278,8 +1356,18 @@ export default function Home() {
                   />
                 </div>
 
-                <div className="bg-black/50 border border-white/20 backdrop-blur-md px-4 py-1.5 rounded-full shadow-xl">
-                  <span className="text-white font-bold text-lg">{shotCount} {shotCount === 1 ? 'Shot' : 'Shots'} Detected</span>
+                <div className="bg-black/50 border border-white/20 backdrop-blur-md px-6 py-3 rounded-2xl shadow-xl flex flex-col items-center gap-1">
+                  <div className="flex items-center gap-4">
+                    <div className="flex flex-col items-center">
+                      <span className="text-white font-black text-xl tabular-nums">{shotCount}<span className="text-gray-500 text-sm font-bold">/{MAX_SHOTS}</span></span>
+                      <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Shots</span>
+                    </div>
+                    <div className="w-px h-8 bg-white/10"></div>
+                    <div className="flex flex-col items-center">
+                      <span className="text-white font-black text-xl tabular-nums">{formatTime(recordingTime)}<span className="text-gray-500 text-sm font-bold">/{MAX_RECORDING_MINUTES}:00</span></span>
+                      <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Elapsed</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1325,13 +1413,9 @@ export default function Home() {
                             alt={`Swing ${idx + 1}`}
                           />
                         ) : (
-                          <video 
-                            src={`${URL.createObjectURL(new Blob([clip.data as any], { type: 'video/mp4' }))}#t=2`} 
-                            className="w-full h-full object-cover" 
-                            muted 
-                            playsInline 
-                            preload="metadata" 
-                          />
+                          <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                            <Video className="w-4 h-4 text-gray-600" />
+                          </div>
                         )}
                       </div>
                     ))}
@@ -1389,13 +1473,10 @@ export default function Home() {
                                alt={`Swing ${idx + 1}`}
                              />
                            ) : (
-                             <video 
-                               src={`${clipUrl}#t=2`}
-                               className="w-full h-full object-cover pointer-events-none" 
-                               muted 
-                               playsInline 
-                               preload="auto" 
-                             />
+                             <div className="flex flex-col items-center text-center p-4">
+                               <Loader2 className="w-6 h-6 animate-spin text-blue-500/30 mb-2" />
+                               <span className="text-[10px] font-bold uppercase tracking-wider text-gray-700">Loading...</span>
+                             </div>
                            )}
                            {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
                            <button 
