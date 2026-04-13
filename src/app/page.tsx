@@ -169,7 +169,7 @@ const VideoControls = memo(({
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center gap-4">
             <button 
-              onPointerDown={() => onStartStep(-1/60)}
+              onPointerDown={() => onStartStep(-1)}
               onPointerUp={onStopStep}
               onPointerLeave={onStopStep}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
@@ -186,7 +186,7 @@ const VideoControls = memo(({
             </button>
 
             <button 
-              onPointerDown={() => onStartStep(1/60)}
+              onPointerDown={() => onStartStep(1)}
               onPointerUp={onStopStep}
               onPointerLeave={onStopStep}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
@@ -249,6 +249,17 @@ export default function Home() {
 
   // Persisted voices for Speech Synthesis
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+
+  useEffect(() => {
+    // On iOS Safari 16.4+, set the audio session type based on app mode.
+    // 'ambient'        — respects the hardware mute switch, but blocks audio capture.
+    // 'play-and-record'— allows microphone access, but ignores the mute switch.
+    // We use 'play-and-record' on the camera screen so the mic works, and switch
+    // to 'ambient' in gallery/review so sounds respect the mute switch.
+    if (!('audioSession' in navigator)) return;
+    (navigator as any).audioSession.type =
+      appState === 'camera' ? 'play-and-record' : 'ambient';
+  }, [appState]);
 
   useEffect(() => {
     const loadVoices = () => {
@@ -632,6 +643,7 @@ export default function Home() {
   const mainVideoRef = useRef<HTMLVideoElement>(null);
   const stepFrameRequestRef = useRef<number | null>(null);
   const stepDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const continuousStepActiveRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -659,47 +671,94 @@ export default function Home() {
 
   const stepFrame = (delta: number) => {
     if (mainVideoRef.current) {
-      mainVideoRef.current.pause();
-      const newTime = Math.max(0, Math.min(duration, mainVideoRef.current.currentTime + delta));
-      mainVideoRef.current.currentTime = newTime;
+      const video = mainVideoRef.current;
+      video.pause();
+      const newTime = Math.max(0, Math.min(duration, video.currentTime + delta));
+      video.currentTime = newTime;
       setCurrentTime(newTime);
-
-      // 1. Audio "Tick" (Universal)
       playTickSound();
-
-      // 2. Haptic Feedback (Android/Chrome)
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(5); 
+        navigator.vibrate(5);
       }
     }
   };
 
-  const startContinuousStep = (delta: number) => {
+  const startContinuousStep = (direction: number) => {
+    const delta = direction / frameRateRef.current;
+
     // 1. Step once immediately (The Tap)
     stepFrame(delta);
 
-    // 2. Clear any existing timers
+    // 2. Clear any existing state
+    continuousStepActiveRef.current = false;
     if (stepDelayTimeoutRef.current) clearTimeout(stepDelayTimeoutRef.current);
     if (stepFrameRequestRef.current) cancelAnimationFrame(stepFrameRequestRef.current);
 
-    // 3. Set a delay before starting the continuous loop (The Hold)
+    // 3. Hold loop — platform-specific to handle decoder differences:
+    //
+    // Android: seeked-event-driven so seeks never queue up (queuing causes the
+    //   "freeze then jump on release" bug). A 100ms minimum between steps caps
+    //   the rate at 10fps; if a seek takes longer we advance as fast as we can.
+    //
+    // Mac/iOS: time-based rAF loop at exactly 10fps. Seeks are instant so we
+    //   need the cap to prevent the button from flying through the clip.
     stepDelayTimeoutRef.current = setTimeout(() => {
-      let lastStepTime = 0;
-      const loop = (timestamp: number) => {
-        if (!lastStepTime) lastStepTime = timestamp;
-        const elapsed = timestamp - lastStepTime;
+      if (!mainVideoRef.current) return;
+      continuousStepActiveRef.current = true;
 
-        if (elapsed > 100) { // 10 FPS (one step every 100ms)
-          stepFrame(delta);
-          lastStepTime = timestamp;
-        }
+      const STEP_INTERVAL_MS = 100; // 10fps cap
+
+      if (/Android/i.test(navigator.userAgent)) {
+        const runAndroidLoop = async () => {
+          while (continuousStepActiveRef.current && mainVideoRef.current) {
+            const stepStart = performance.now();
+            stepFrame(delta);
+
+            // Wait for the seek to finish before queuing the next one
+            await new Promise<void>(resolve => {
+              mainVideoRef.current!.addEventListener('seeked', resolve, { once: true });
+            });
+
+            if (!continuousStepActiveRef.current) return;
+
+            // Pad to 100ms minimum so we never exceed 10fps even if seek was fast
+            const elapsed = performance.now() - stepStart;
+            if (elapsed < STEP_INTERVAL_MS) {
+              await new Promise<void>(resolve => setTimeout(resolve, STEP_INTERVAL_MS - elapsed));
+            }
+          }
+        };
+        runAndroidLoop();
+      } else {
+        // Mac / iOS: time-based rAF, track targetTime independently of seek speed
+        let targetTime = mainVideoRef.current.currentTime;
+        let lastStepTime = performance.now();
+
+        const loop = (now: number) => {
+          if (!continuousStepActiveRef.current || !mainVideoRef.current) return;
+
+          if (now - lastStepTime >= STEP_INTERVAL_MS) {
+            lastStepTime = now;
+            targetTime = Math.max(0, Math.min(duration, targetTime + delta));
+            mainVideoRef.current.pause();
+            mainVideoRef.current.currentTime = targetTime;
+            setCurrentTime(targetTime);
+            playTickSound();
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+              navigator.vibrate(5);
+            }
+          }
+
+          stepFrameRequestRef.current = requestAnimationFrame(loop);
+        };
+
         stepFrameRequestRef.current = requestAnimationFrame(loop);
-      };
-      stepFrameRequestRef.current = requestAnimationFrame(loop);
+      }
     }, 250); // Wait 250ms of holding before "running"
   };
 
   const stopContinuousStep = () => {
+    continuousStepActiveRef.current = false;
     if (stepDelayTimeoutRef.current) {
       clearTimeout(stepDelayTimeoutRef.current);
       stepDelayTimeoutRef.current = null;
@@ -712,6 +771,7 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
+      continuousStepActiveRef.current = false;
       if (stepDelayTimeoutRef.current) clearTimeout(stepDelayTimeoutRef.current);
       if (stepFrameRequestRef.current) cancelAnimationFrame(stepFrameRequestRef.current);
     };

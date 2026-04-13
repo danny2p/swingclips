@@ -173,9 +173,9 @@ export async function processSwings(
       } else {
         // Android/Desktop: SUPER FAST SINGLE PASS + FAST THUMBNAIL
         await fm.exec([
-          '-ss', startTime.toString(), 
-          '-i', activeInputFile, 
-          '-t', duration.toString(), 
+          '-ss', startTime.toString(),
+          '-i', activeInputFile,
+          '-t', duration.toString(),
           '-c', 'copy',
           outputFileName
         ]);
