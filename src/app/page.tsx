@@ -3,8 +3,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
 import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
-import { Session, getAllSessions, saveSession, deleteSession } from '@/utils/db';
+import { Session, getAllSessions, saveSession, deleteSession, getSession } from '@/utils/db';
 import JSZip from 'jszip';
+
+// Sequential DB queue to prevent overlapping transactions and data corruption on mobile
+let dbQueue = Promise.resolve();
 
 export default function Home() {
   // App states: 'camera' | 'processing' | 'gallery' | 'history'
@@ -592,72 +595,76 @@ export default function Home() {
   };
 
   const persistIncrementalClip = async (sessionId: number, index: number, videoBlob: Blob, thumbnailData?: Uint8Array) => {
-    try {
-      const allSessions = await getAllSessions();
-      const currentSession = allSessions.find(s => s.id === sessionId);
-      if (!currentSession) return;
+    // Add to sequential queue to prevent overlapping DB transactions
+    dbQueue = dbQueue.then(async () => {
+      try {
+        const currentSession = await getSession(sessionId);
+        if (!currentSession) return;
 
-      const arrayBuffer = await videoBlob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      
-      // Convert raw JPEG bytes to Base64 for stable storage
-      let thumbnailBase64 = '';
-      if (thumbnailData) {
-        // Use a more memory-efficient way to convert Uint8Array to base64
-        const binary = Array.from(thumbnailData).map(b => String.fromCharCode(b)).join('');
-        thumbnailBase64 = `data:image/jpeg;base64,${window.btoa(binary)}`;
+        const arrayBuffer = await videoBlob.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        
+        let thumbnailBase64 = '';
+        if (thumbnailData) {
+          const binary = Array.from(thumbnailData).map(b => String.fromCharCode(b)).join('');
+          thumbnailBase64 = `data:image/jpeg;base64,${window.btoa(binary)}`;
+        }
+
+        const updatedClips = [...currentSession.clips];
+        updatedClips[index] = {
+          ...updatedClips[index],
+          data: uint8Array,
+          thumbnail: thumbnailBase64 || updatedClips[index]?.thumbnail || ''
+        };
+
+        const updatedSession: Session = {
+          ...currentSession,
+          clips: updatedClips
+        };
+        await saveSession(updatedSession);
+        
+        // Update UI state for thumbnails if we got a new one
+        if (thumbnailBase64) {
+          setThumbnails(prev => {
+            const next = [...prev];
+            next[index] = thumbnailBase64;
+            return next;
+          });
+        }
+      } catch (err) {
+        console.error("Error persisting incremental clip:", err);
       }
-
-      const updatedClips = [...currentSession.clips];
-      updatedClips[index] = {
-        ...updatedClips[index],
-        data: uint8Array,
-        thumbnail: thumbnailBase64
-      };
-
-      const updatedSession: Session = {
-        ...currentSession,
-        clips: updatedClips
-      };
-      await saveSession(updatedSession);
-      
-      // Update UI state
-      if (thumbnailBase64) {
-        setThumbnails(prev => {
-          const next = [...prev];
-          next[index] = thumbnailBase64;
-          return next;
-        });
-      }
-
-      await loadHistory(); // Refresh history list
-    } catch (err) {
-      console.error("Error persisting incremental clip:", err);
-    }
+    });
+    
+    return dbQueue;
   };
 
   const updateNotesInDB = useCallback(async () => {
     if (currentSessionId === null) return;
-    try {
-      // Find session to get its existing blobs
-      const allSessions = await getAllSessions();
-      const currentSession = allSessions.find(s => s.id === currentSessionId);
-      if (!currentSession) return;
+    
+    // Add to sequential queue
+    dbQueue = dbQueue.then(async () => {
+      try {
+        const currentSession = await getSession(currentSessionId);
+        if (!currentSession) return;
 
-      const updatedSession: Session = {
-        ...currentSession,
-        sessionName,
-        sessionNotes,
-        clips: currentSession.clips.map((clip, idx) => ({
-          ...clip,
-          shotNote: shotNotes[idx] || '',
-          isFavorite: favorites[idx] || false
-        }))
-      };
-      await saveSession(updatedSession);
-    } catch (err) {
-      console.error("Error updating notes in DB:", err);
-    }
+        const updatedSession: Session = {
+          ...currentSession,
+          sessionName,
+          sessionNotes,
+          clips: currentSession.clips.map((clip, idx) => ({
+            ...clip,
+            shotNote: shotNotes[idx] || '',
+            isFavorite: favorites[idx] || false
+          }))
+        };
+        await saveSession(updatedSession);
+      } catch (err) {
+        console.error("Error updating notes in DB:", err);
+      }
+    });
+    
+    return dbQueue;
   }, [currentSessionId, sessionName, sessionNotes, shotNotes, favorites]);
 
   // Debounce note syncing
@@ -957,6 +964,17 @@ export default function Home() {
               next[index] = clipUrl;
               return next;
             });
+
+            // Convert raw thumbnail data to Base64 for immediate UI display if present
+            if (thumbnail) {
+              const binary = Array.from(thumbnail).map(b => String.fromCharCode(b)).join('');
+              const base64 = `data:image/jpeg;base64,${window.btoa(binary)}`;
+              setThumbnails(prev => {
+                const next = [...prev];
+                next[index] = base64;
+                return next;
+              });
+            }
             
             // Save each clip to DB as soon as it's ready
             await persistIncrementalClip(sessionId, index, clipBlob, thumbnail);
@@ -1389,8 +1407,8 @@ export default function Home() {
                          </>
                        ) : (
                          <div className="flex flex-col items-center text-center p-4">
-                           <Loader2 className="w-8 h-8 animate-spin text-blue-500 mb-2" />
-                           <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{progressText || 'Preparing...'}</span>
+                           <Loader2 className="w-8 h-8 animate-spin text-blue-500/50 mb-2" />
+                           <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600">Slicing...</span>
                          </div>
                        )}
                      </div>
