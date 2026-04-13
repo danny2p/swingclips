@@ -687,6 +687,7 @@ export default function Home() {
   const stepFrame = (delta: number) => {
     if (mainVideoRef.current) {
       const video = mainVideoRef.current;
+      video.muted = true;
       video.pause();
       const newTime = Math.max(0, Math.min(duration, video.currentTime + delta));
       video.currentTime = newTime;
@@ -696,6 +697,7 @@ export default function Home() {
   };
 
   const startContinuousStep = (direction: number) => {
+    if (mainVideoRef.current) mainVideoRef.current.muted = true;
     const delta = direction / frameRateRef.current;
     const isAndroid = /Android/i.test(navigator.userAgent);
     const hasRVFC = typeof (mainVideoRef.current as any)?.requestVideoFrameCallback === 'function';
@@ -832,7 +834,10 @@ export default function Home() {
       (mainVideoRef.current as any).cancelVideoFrameCallback(rvfcHandleRef.current);
       rvfcHandleRef.current = null;
     }
-    if (mainVideoRef.current) mainVideoRef.current.pause();
+    if (mainVideoRef.current) {
+      mainVideoRef.current.muted = false;
+      mainVideoRef.current.pause();
+    }
     if (stepDelayTimeoutRef.current) {
       clearTimeout(stepDelayTimeoutRef.current);
       stepDelayTimeoutRef.current = null;
