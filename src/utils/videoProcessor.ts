@@ -60,8 +60,27 @@ export async function resetFFmpeg() {
   }
 }
 
-// Per-exec timeout: prevents Android from hanging indefinitely if FFmpeg stalls.
+// Per-operation timeout: prevents Android from hanging indefinitely if the
+// FFmpeg Worker is killed by the OS (Worker death silently hangs promises).
 const EXEC_TIMEOUT_MS = 30_000;
+const READ_TIMEOUT_MS = 30_000;
+
+// Incremented each time processSwings starts. Old loops check against their
+// captured ID and exit early if a newer session has taken over.
+let processingId = 0;
+
+async function readFileWithTimeout(fm: FFmpeg, path: string, label: string): Promise<Uint8Array<ArrayBuffer>> {
+  let timerId: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timerId = setTimeout(() => reject(new Error(`${label} readFile timed out after ${READ_TIMEOUT_MS / 1000}s`)), READ_TIMEOUT_MS);
+  });
+  try {
+    const result = await Promise.race([fm.readFile(path), timeoutPromise]);
+    return new Uint8Array(result as any) as unknown as Uint8Array<ArrayBuffer>;
+  } finally {
+    clearTimeout(timerId!);
+  }
+}
 
 export async function initFFmpeg(onProgress: (msg: string) => void): Promise<FFmpeg> {
   if (ffmpeg && (ffmpeg as any).isLoaded) { scLog('initFFmpeg: reusing loaded instance'); return ffmpeg; }
@@ -101,86 +120,79 @@ export async function processSwings(
   onProgress: (progress: string) => void,
   onClipReady?: (index: number, clipUrl: string, clipBlob: Blob, thumbnail?: Uint8Array) => void
 ): Promise<{url: string, blob: Blob, thumbnail?: Uint8Array}[]> {
+  // Claim this session's ID. Any older processSwings loop still running will
+  // detect the mismatch and exit, preventing them from racing on the new engine.
+  const myId = ++processingId;
+
   scLog(`processSwings start — ${impacts.length} clips, blob ${(videoBlob.size / 1024 / 1024).toFixed(1)}MB, ffmpegLoaded=${!!(ffmpeg && (ffmpeg as any).isLoaded)}`);
-  // Reset any existing instance to free the WASM heap from the previous session
-  // before loading this session's video blob. Prevents intermittent OOM failures
-  // on memory-constrained Android devices.
   await resetFFmpeg();
   scLog('FFmpeg reset complete, loading engine...');
-  const fm = await initFFmpeg(onProgress);
+  let activeFm = await initFFmpeg(onProgress);
   scLog('FFmpeg engine ready');
 
   const isIOS = typeof navigator !== 'undefined' && (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
   );
 
   const ext = videoBlob.type.includes('mp4') || videoBlob.type.includes('quicktime') ? 'mp4' : 'webm';
   const inputFileName = `input.${ext}`;
   const optimizedFileName = `optimized_${inputFileName}`;
-  
-  onProgress('Reading recorded session...');
-  
-  // LOW MEMORY OPTIMIZATION:
-  // Instead of using fetchFile(videoBlob) which creates a temporary Uint8Array 
-  // that persists until GC, we manually handle the ArrayBuffer and null it out.
-  let fileData: Uint8Array | null = await fetchFile(videoBlob);
-  const fileSize = fileData.length;
-  await fm.writeFile(inputFileName, fileData);
-  scLog(`writeFile complete: ${inputFileName} (${fileSize} bytes)`);
-  fileData = null; // Explicitly free memory reference
 
-  let activeInputFile = inputFileName;
+  // Helper: write the session video into the active WASM instance.
+  const writeInputFile = async (fm: FFmpeg): Promise<string> => {
+    onProgress('Reading recorded session...');
+    let fileData: Uint8Array | null = await fetchFile(videoBlob);
+    const fileSize = fileData.length;
+    await fm.writeFile(inputFileName, fileData);
+    scLog(`writeFile complete: ${inputFileName} (${fileSize} bytes)`);
+    fileData = null;
 
-  if (isIOS) {
-    onProgress('Optimizing video for mobile slicing...');
-    try {
-      await fm.exec([
-        '-i', inputFileName,
-        '-c', 'copy',
-        '-movflags', '+faststart',
-        optimizedFileName
-      ]);
-      await fm.deleteFile(inputFileName);
-      activeInputFile = optimizedFileName;
-    } catch (err) {
-      scError('Fast-start optimization failed, falling back to raw input', err);
-      activeInputFile = inputFileName;
+    if (isIOS) {
+      onProgress('Optimizing video for mobile slicing...');
+      try {
+        await fm.exec(['-i', inputFileName, '-c', 'copy', '-movflags', '+faststart', optimizedFileName]);
+        await fm.deleteFile(inputFileName);
+        return optimizedFileName;
+      } catch (err) {
+        scError('Fast-start optimization failed, falling back to raw input', err);
+      }
     }
-  }
+    return inputFileName;
+  };
 
-  let activeFm = await initFFmpeg(onProgress);
+  let activeInputFile = await writeInputFile(activeFm);
 
-  // Process one by one and release memory immediately via onClipReady
+  // When a clip operation fails (exec timeout or Worker death), set this flag.
+  // The next iteration will reset + reinitialise FFmpeg before attempting the clip.
+  // The "fresh engine reset every 10 clips" strategy has been removed: re-writing
+  // the full session video to a new WASM heap was the memory spike that was killing
+  // the Worker on Android for large sessions.
+  let needsEngineReset = false;
+
   for (let i = 0; i < impacts.length; i++) {
-    // FRESH ENGINE STRATEGY:
-    // Every 10 clips, completely reset FFmpeg to flush WASM memory.
-    if (i > 0 && i % 10 === 0) {
-      onProgress(`Refreshing video engine (clip ${i + 1})...`);
+    // If a newer session has started, stop immediately to avoid contaminating it.
+    if (processingId !== myId) {
+      scLog(`processSwings ${myId}: superseded by session ${processingId} at clip ${i + 1}, aborting`);
+      return [];
+    }
+
+    // Recover from a previous clip's Worker death before attempting this clip.
+    if (needsEngineReset) {
+      needsEngineReset = false;
+      onProgress(`Recovering engine (clip ${i + 1} of ${impacts.length})...`);
       try {
         await resetFFmpeg();
         activeFm = await initFFmpeg(onProgress);
-
-        // Re-write the input file to the new engine's filesystem.
-        // This is the most memory-intensive step on long sessions — if it fails
-        // (e.g. Android out-of-WASM-heap), fall back to the previous engine
-        // rather than crashing the entire loop.
-        let fileData: Uint8Array | null = await fetchFile(videoBlob);
-        await activeFm.writeFile(inputFileName, fileData);
-        fileData = null;
-
-        if (isIOS) {
-          await activeFm.exec(['-i', inputFileName, '-c', 'copy', '-movflags', '+faststart', optimizedFileName]);
-          await activeFm.deleteFile(inputFileName);
-        }
-      } catch (resetErr) {
-        scError(`Fresh engine reset failed at clip ${i + 1}, continuing with existing engine`, resetErr);
-        // Re-initialise activeFm from the singleton in case it was partially torn down
-        activeFm = await initFFmpeg(onProgress);
+        activeInputFile = await writeInputFile(activeFm);
+        scLog(`Engine recovery successful at clip ${i + 1}`);
+      } catch (recoveryErr) {
+        scError(`Engine recovery failed at clip ${i + 1}, aborting session`, recoveryErr);
+        onProgress('Processing stopped — please try recording a shorter session.');
+        return [];
       }
     }
 
-    const fm = activeFm;
     const impactTime = impacts[i];
     const startTime = Math.max(0, impactTime - PRE_IMPACT_SECONDS);
     const duration = CLIP_DURATION;
@@ -189,7 +201,7 @@ export async function processSwings(
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     scLog(`Clip ${i + 1}: start=${startTime.toFixed(2)}s input=${activeInputFile}`);
     try {
-      const clipRet = await fm.exec([
+      const clipRet = await activeFm.exec([
         '-ss', startTime.toString(),
         '-i', activeInputFile,
         '-t', duration.toString(),
@@ -199,15 +211,13 @@ export async function processSwings(
       if (clipRet !== 0) throw new Error(`clip exec returned ${clipRet}`);
       scLog(`Clip ${i + 1}: clip exec done, reading file...`);
 
-      const data = await fm.readFile(outputFileName);
-      scLog(`Clip ${i + 1}: clip readFile done (${(data as any).length} bytes)`);
-      const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
+      const data = await readFileWithTimeout(activeFm, outputFileName, `clip ${i + 1}`);
+      scLog(`Clip ${i + 1}: clip readFile done (${data.length} bytes)`);
+      const clipBlob = new Blob([data], { type: 'video/mp4' });
       const url = URL.createObjectURL(clipBlob);
 
       // Extract thumbnail from the output clip (not the full session video).
-      // Seeking within the small 4-second clip is much cheaper than seeking
-      // through the full session video on Android's hardware decoder.
-      const thumbRet = await fm.exec([
+      const thumbRet = await activeFm.exec([
         '-ss', THUMBNAIL_OFFSET.toString(),
         '-i', outputFileName,
         '-vframes', '1',
@@ -219,22 +229,25 @@ export async function processSwings(
       if (thumbRet !== 0) throw new Error(`thumb exec returned ${thumbRet}`);
       scLog(`Clip ${i + 1}: thumb exec done, reading file...`);
 
-      const thumbData = await fm.readFile(thumbFileName);
-      scLog(`Clip ${i + 1}: thumb readFile done (${(thumbData as any).length} bytes)`);
-      const thumbnail = new Uint8Array(thumbData as any);
+      const thumbnail = await readFileWithTimeout(activeFm, thumbFileName, `thumb ${i + 1}`);
+      scLog(`Clip ${i + 1}: thumb readFile done (${thumbnail.length} bytes)`);
 
       // Free WASM heap before the JS-level onClipReady work (Base64, IndexedDB).
-      await fm.deleteFile(outputFileName);
-      await fm.deleteFile(thumbFileName);
+      await activeFm.deleteFile(outputFileName);
+      await activeFm.deleteFile(thumbFileName);
 
       scLog(`Clip ${i + 1} ready, size=${clipBlob.size}`);
       if (onClipReady) await onClipReady(i, url, clipBlob, thumbnail);
     } catch (err) {
       scError(`Clip ${i + 1} FAILED`, err);
       onProgress(`Error on swing ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+      // A timeout means the Worker is likely dead — reset before the next clip.
+      if (err instanceof Error && err.message.includes('timed out')) {
+        needsEngineReset = true;
+      }
     }
   }
-  
+
   onProgress('Finalizing gallery...');
   try {
     await activeFm.deleteFile(activeInputFile);

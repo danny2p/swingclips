@@ -960,7 +960,7 @@ export default function Home() {
 
     const overlayBlob = await generateOverlayBlob();
     if (!overlayBlob) {
-      downloadClip(url, selectedClipIndex);
+      downloadClip(url, selectedClipIndex, false);
       return;
     }
 
@@ -970,7 +970,7 @@ export default function Home() {
       const videoRes = await fetch(url);
       const videoBlob = await videoRes.blob();
       const finalUrl = await burnLinesToVideo(videoBlob, overlayBlob, setBurnProgress);
-      downloadClip(finalUrl, selectedClipIndex);
+      downloadClip(finalUrl, selectedClipIndex, true);
     } catch (err) {
       alert("Failed to process video lines.");
     } finally {
@@ -986,7 +986,7 @@ export default function Home() {
 
     const overlayBlob = await generateOverlayBlob();
     if (!overlayBlob) {
-      shareClip(url, selectedClipIndex);
+      shareClip(url, selectedClipIndex, false);
       return;
     }
 
@@ -996,7 +996,7 @@ export default function Home() {
       const videoRes = await fetch(url);
       const videoBlob = await videoRes.blob();
       const finalUrl = await burnLinesToVideo(videoBlob, overlayBlob, setBurnProgress);
-      await shareClip(finalUrl, selectedClipIndex);
+      await shareClip(finalUrl, selectedClipIndex, true);
     } catch (err) {
       alert("Failed to process video lines.");
     } finally {
@@ -1486,21 +1486,30 @@ export default function Home() {
     setShotNotes(newNotes);
   };
 
-  const downloadClip = (url: string, index: number) => {
+  const buildClipFilename = (index: number, withLines?: boolean): string => {
+    const ts = currentSessionId ?? Date.now();
+    const d = new Date(ts);
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const hm = `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+    const num = String(index + 1).padStart(2, '0');
+    return `swing-${ymd}-${hm}-${num}${withLines ? '-l' : ''}.mp4`;
+  };
+
+  const downloadClip = (url: string, index: number, withLines?: boolean) => {
     const a = document.createElement('a');
     a.href = url;
-    a.download = `swing_${index + 1}.mp4`;
+    a.download = buildClipFilename(index, withLines);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
-  const shareClip = async (url: string, index: number) => {
+  const shareClip = async (url: string, index: number, withLines?: boolean) => {
     try {
       if (!navigator.share) { alert("Sharing not supported."); return; }
       const response = await fetch(url);
       const blob = await response.blob();
-      const file = new File([blob], `swing_${index + 1}.mp4`, { type: blob.type });
+      const file = new File([blob], buildClipFilename(index, withLines), { type: blob.type });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: `SwingClips #${index + 1}`, text: 'Check out my swing!', });
       }
@@ -1516,7 +1525,7 @@ export default function Home() {
       if (!clips[i]) continue;
       const response = await fetch(clips[i] as string);
       const blob = await response.blob();
-      zip.file(`swing_${i + 1}.mp4`, blob);
+      zip.file(buildClipFilename(i), blob);
     }
     let reportText = `GOLF SESSION REPORT - ${new Date().toLocaleString()}\n`;
     reportText += `==========================================\n\n`;
