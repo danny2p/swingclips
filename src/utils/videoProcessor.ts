@@ -62,8 +62,8 @@ export async function resetFFmpeg() {
 
 // Per-operation timeout: prevents Android from hanging indefinitely if the
 // FFmpeg Worker is killed by the OS (Worker death silently hangs promises).
-const EXEC_TIMEOUT_MS = 30_000;
-const READ_TIMEOUT_MS = 30_000;
+const EXEC_TIMEOUT_MS = 15_000;
+const READ_TIMEOUT_MS = 15_000;
 
 // Incremented each time processSwings starts. Old loops check against their
 // captured ID and exit early if a newer session has taken over.
