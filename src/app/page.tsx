@@ -1790,7 +1790,19 @@ export default function Home() {
             <div><h1 className="text-lg font-bold text-white">Session Gallery</h1><p className="text-xs text-gray-400">{clips.length} swings captured</p></div>
             <div className="flex gap-2">
               <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><History className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">History</span></button>
-              <button onClick={downloadAllAsZip} className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"><Archive className="w-4 h-4 text-white" /><span className="text-sm font-semibold text-white">ZIP All</span></button>
+              <button
+                onClick={downloadAllAsZip}
+                onPointerDown={() => {
+                  downloadLongPressRef.current = setTimeout(() => {
+                    downloadLongPressRef.current = null;
+                    navigator.clipboard.writeText(getDebugLog()).catch(() => {});
+                  }, 700);
+                }}
+                onPointerUp={() => { clearTimeout(downloadLongPressRef.current ?? undefined); downloadLongPressRef.current = null; }}
+                onPointerLeave={() => { clearTimeout(downloadLongPressRef.current ?? undefined); downloadLongPressRef.current = null; }}
+                className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"
+                title="ZIP All (long-press to copy debug log)"
+              ><Archive className="w-4 h-4 text-white" /><span className="text-sm font-semibold text-white">ZIP All</span></button>
               <button onClick={resetApp} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><RotateCcw className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">New</span></button>
             </div>
           </div>
