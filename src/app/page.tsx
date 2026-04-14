@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
-import { processSwings, burnLinesToVideo } from '@/utils/videoProcessor';
-import { Session, getAllSessions, saveSession, deleteSession, getSession } from '@/utils/db';
+import { processSwings, burnLinesToVideo, resetFFmpeg, extractThumbnail, THUMBNAIL_OFFSET, clearDebugLog } from '@/utils/videoProcessor';
+import { Session, getAllSessions, saveSession, deleteSession, getSession, getStoredConfig, saveStoredConfig, AppConfig } from '@/utils/db';
 import JSZip from 'jszip';
 
 // Sequential DB queue to prevent overlapping transactions and data corruption on mobile
@@ -451,6 +451,7 @@ export default function Home() {
   // Persistence & History
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  const currentSessionIdRef = useRef<number | null>(null);
 
   // Gallery
   const [clips, setClips] = useState<(string | null)[]>([]);
@@ -462,6 +463,7 @@ export default function Home() {
   const [showNotes, setShowNotes] = useState(false);
   const [favorites, setFavorites] = useState<boolean[]>([]);
   const [clipByteSizes, setClipByteSizes] = useState<(number | null)[]>([]);
+  const [migrationProgress, setMigrationProgress] = useState<string | null>(null);
   const holdStepCountRef = useRef(0);
 
   // Recording Timer & Limits
@@ -1010,6 +1012,86 @@ export default function Home() {
   };
 
   // DB Operations
+  // Runs background migrations when env-var-driven config changes between deploys.
+  // Three guarantees:
+  //   1. Re-reads each session fresh from DB before saving to avoid overwriting
+  //      concurrent user changes (notes, favorites) made mid-migration.
+  //   2. Saves thumbnailOffset per-session as each one completes, so a partial
+  //      run (e.g. app exit) resumes where it left off rather than restarting.
+  //   3. Updates the active gallery's thumbnail state if the open session is
+  //      among those migrated, so the user sees updated images immediately.
+  const runMigrations = async () => {
+    try {
+      const currentConfig: AppConfig = { thumbnailOffset: THUMBNAIL_OFFSET };
+      const storedConfig = await getStoredConfig();
+
+      const needsThumbnailRegen =
+        storedConfig === null || storedConfig.thumbnailOffset !== currentConfig.thumbnailOffset;
+
+      if (!needsThumbnailRegen) return;
+
+      const sessions = await getAllSessions();
+
+      // Only count sessions that still need processing (not already migrated to this offset)
+      const clipsToProcess = sessions.flatMap(s =>
+        s.thumbnailOffset === currentConfig.thumbnailOffset
+          ? []
+          : s.clips.filter(c => c.data.byteLength > 0)
+      );
+
+      if (clipsToProcess.length === 0) {
+        await saveStoredConfig(currentConfig);
+        return;
+      }
+
+      let processed = 0;
+      setMigrationProgress(`Updating thumbnails (${processed}/${clipsToProcess.length})…`);
+
+      for (const session of sessions) {
+        // Skip sessions already migrated to this offset (survived a previous partial run)
+        if (session.thumbnailOffset === currentConfig.thumbnailOffset) continue;
+
+        // Fix #1: re-read fresh from DB so we don't overwrite any user changes
+        // (notes, favorites) that happened while we were processing earlier sessions.
+        const freshSession = await getSession(session.id);
+        if (!freshSession) continue;
+
+        let sessionChanged = false;
+        for (let i = 0; i < freshSession.clips.length; i++) {
+          const clip = freshSession.clips[i];
+          if (clip.data.byteLength === 0) continue;
+          try {
+            const blob = new Blob([new Uint8Array(clip.data)], { type: 'video/mp4' });
+            const thumbnail = await extractThumbnail(blob);
+            freshSession.clips[i] = { ...clip, thumbnail };
+            sessionChanged = true;
+          } catch (e) {
+            console.warn(`Thumbnail migration failed for clip ${i} in session ${session.id}:`, e);
+          }
+          processed++;
+          setMigrationProgress(`Updating thumbnails (${processed}/${clipsToProcess.length})…`);
+        }
+
+        if (sessionChanged) {
+          // Fix #2: stamp the offset on the session so it's skipped on next run
+          await saveSession({ ...freshSession, thumbnailOffset: currentConfig.thumbnailOffset });
+
+          // Fix #3: if this is the currently-open session, update the gallery immediately
+          if (currentSessionIdRef.current === freshSession.id) {
+            setThumbnails(freshSession.clips.map(c => c.thumbnail || null));
+          }
+        }
+      }
+
+      await saveStoredConfig(currentConfig);
+      await loadHistory();
+    } catch (e) {
+      console.warn('Migration failed:', e);
+    } finally {
+      setMigrationProgress(null);
+    }
+  };
+
   const loadHistory = async () => {
     try {
       const data = await getAllSessions();
@@ -1118,7 +1200,7 @@ export default function Home() {
     setClipByteSizes(session.clips.map(c => c.data.byteLength > 0 ? c.data.byteLength : null));
     setSessionName(session.sessionName || '');
     setSessionNotes(session.sessionNotes);
-    setCurrentSessionId(session.id);
+    setCurrentSessionId(session.id); currentSessionIdRef.current = session.id;
     setAppState('gallery');
   };
 
@@ -1131,7 +1213,7 @@ export default function Home() {
         setClips([]);
         setShotNotes([]);
         setSessionNotes('');
-        setCurrentSessionId(null);
+        setCurrentSessionId(null); currentSessionIdRef.current = null;
       }
     }
   };
@@ -1204,6 +1286,7 @@ export default function Home() {
 
   useEffect(() => {
     loadHistory();
+    runMigrations();
   }, []);
 
   const toggleCamera = () => {
@@ -1350,7 +1433,7 @@ export default function Home() {
     // Clear previous session metadata for the new recording
     setSessionName('');
     setSessionNotes('');
-    setCurrentSessionId(null);
+    setCurrentSessionId(null); currentSessionIdRef.current = null;
 
     isRecordingRef.current = true;
     setIsRecording(true);
@@ -1385,7 +1468,7 @@ export default function Home() {
 
         // 2. Create the session in DB immediately with "empty" slots
         const sessionId = Date.now();
-        setCurrentSessionId(sessionId);
+        setCurrentSessionId(sessionId); currentSessionIdRef.current = sessionId;
         const placeholderClips = initialNotes.map(() => ({
           data: new Uint8Array(0),
           shotNote: '',
@@ -1403,12 +1486,14 @@ export default function Home() {
         await loadHistory();
 
         // 3. Process and update one-by-one (lightning fast now)
+        clearDebugLog();
         const processedUrls: (string | null)[] = new Array(impacts.length).fill(null);
         await processSwings(
           fullVideoBlob,
           impacts,
           setProgressText,
           async (index, clipUrl, clipBlob, thumbnail) => {
+            console.log(`[SC] onClipReady index=${index} size=${clipBlob.size}`);
             processedUrls[index] = clipUrl;
             setClips(prev => {
               const next = [...prev];
@@ -1428,7 +1513,11 @@ export default function Home() {
             }
 
             // Save each clip to DB as soon as it's ready
-            await persistIncrementalClip(sessionId, index, clipBlob, thumbnail);
+            try {
+              await persistIncrementalClip(sessionId, index, clipBlob, thumbnail);
+            } catch (dbErr) {
+              console.error(`[SC] persistIncrementalClip failed for index=${index}:`, dbErr);
+            }
           }
         );
 
@@ -1495,6 +1584,10 @@ export default function Home() {
     setActiveDeviceName('');
     setShowDeviceToast(false);
     setAppState('camera');
+    // Fire-and-forget: the WASM worker shuts down in the background (300ms).
+    // processSwings also calls resetFFmpeg at its own start, so if the worker
+    // isn't fully dead yet when the user taps Record again, it gets cleaned up there.
+    resetFFmpeg();
   };
 
   const updateShotNote = (index: number, text: string) => {
@@ -1664,6 +1757,13 @@ export default function Home() {
 
   return (
     <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden select-none">
+
+      {migrationProgress && (
+        <div className="fixed bottom-4 inset-x-4 z-50 flex items-center gap-2 px-4 py-3 bg-gray-900/95 border border-gray-700 rounded-xl shadow-2xl backdrop-blur-md text-xs text-gray-300 font-medium">
+          <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0 text-blue-400" />
+          {migrationProgress}
+        </div>
+      )}
 
       {appState === 'camera' && (
         <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
