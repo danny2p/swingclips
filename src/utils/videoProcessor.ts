@@ -69,6 +69,19 @@ const READ_TIMEOUT_MS = 30_000;
 // captured ID and exit early if a newer session has taken over.
 let processingId = 0;
 
+async function execWithTimeout(fm: FFmpeg, args: string[], label: string): Promise<number> {
+  let timerId: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timerId = setTimeout(() => reject(new Error(`${label} exec timed out after ${EXEC_TIMEOUT_MS / 1000}s`)), EXEC_TIMEOUT_MS);
+  });
+  try {
+    const result = await Promise.race([fm.exec(args), timeoutPromise]);
+    return result as number;
+  } finally {
+    clearTimeout(timerId!);
+  }
+}
+
 async function readFileWithTimeout(fm: FFmpeg, path: string, label: string): Promise<Uint8Array<ArrayBuffer>> {
   let timerId: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -151,7 +164,7 @@ export async function processSwings(
     if (isIOS) {
       onProgress('Optimizing video for mobile slicing...');
       try {
-        await fm.exec(['-i', inputFileName, '-c', 'copy', '-movflags', '+faststart', optimizedFileName]);
+        await execWithTimeout(fm, ['-i', inputFileName, '-c', 'copy', '-movflags', '+faststart', optimizedFileName], 'faststart');
         await fm.deleteFile(inputFileName);
         return optimizedFileName;
       } catch (err) {
@@ -201,13 +214,13 @@ export async function processSwings(
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     scLog(`Clip ${i + 1}: start=${startTime.toFixed(2)}s input=${activeInputFile}`);
     try {
-      const clipRet = await activeFm.exec([
+      const clipRet = await execWithTimeout(activeFm, [
         '-ss', startTime.toString(),
         '-i', activeInputFile,
         '-t', duration.toString(),
         '-c', 'copy',
         outputFileName
-      ], EXEC_TIMEOUT_MS);
+      ], `clip ${i + 1}`);
       if (clipRet !== 0) throw new Error(`clip exec returned ${clipRet}`);
       scLog(`Clip ${i + 1}: clip exec done, reading file...`);
 
@@ -217,7 +230,7 @@ export async function processSwings(
       const url = URL.createObjectURL(clipBlob);
 
       // Extract thumbnail from the output clip (not the full session video).
-      const thumbRet = await activeFm.exec([
+      const thumbRet = await execWithTimeout(activeFm, [
         '-ss', THUMBNAIL_OFFSET.toString(),
         '-i', outputFileName,
         '-vframes', '1',
@@ -225,7 +238,7 @@ export async function processSwings(
         '-update', '1',
         '-f', 'image2',
         thumbFileName
-      ], EXEC_TIMEOUT_MS);
+      ], `thumb ${i + 1}`);
       if (thumbRet !== 0) throw new Error(`thumb exec returned ${thumbRet}`);
       scLog(`Clip ${i + 1}: thumb exec done, reading file...`);
 
