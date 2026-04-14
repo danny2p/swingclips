@@ -174,15 +174,15 @@ const VideoControls = memo(({
 }: VideoControlsProps) => {
   return (
     <div className="absolute bottom-10 inset-x-0 z-40 px-6 pointer-events-none">
-      <div className="max-w-3xl mx-auto w-full flex flex-col gap-3 pointer-events-auto bg-black/60 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 shadow-2xl">
+      <div className="max-w-3xl mx-auto w-full flex flex-col gap-3 pointer-events-auto">
         {/* Row 1: Controls */}
         <div className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
             <button
               onPointerDown={() => onStartStep(-1)}
               onPointerUp={onStopStep}
               onPointerLeave={onStopStep}
-              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
+              className="p-2 bg-black/75 hover:bg-black/90 rounded-full text-white transition-colors"
               title="Previous Frame"
             >
               <ChevronLeft className="w-5 h-5" />
@@ -190,16 +190,16 @@ const VideoControls = memo(({
 
             <button
               onClick={onTogglePlay}
-              className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-90"
+              className="p-2 bg-black/75 hover:bg-black/90 rounded-full text-white transition-colors active:scale-90"
             >
-              {isPlaying ? <Pause className="w-5 h-5 text-white fill-current" /> : <Play className="w-5 h-5 text-white fill-current translate-x-0.5" />}
+              {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current translate-x-0.5" />}
             </button>
 
             <button
               onPointerDown={() => onStartStep(1)}
               onPointerUp={onStopStep}
               onPointerLeave={onStopStep}
-              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white hover:text-white transition-colors"
+              className="p-2 bg-black/75 hover:bg-black/90 rounded-full text-white transition-colors"
               title="Next Frame"
             >
               <ChevronRight className="w-5 h-5" />
@@ -208,7 +208,7 @@ const VideoControls = memo(({
 
           <button
             onClick={onTogglePlaybackRate}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all active:scale-90 border ml-8 ${playbackRate === 0.25 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white/50 border-white/10 text-gray-300'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all active:scale-90 ml-4 ${playbackRate === 0.25 ? 'bg-blue-600 text-white' : 'bg-black/75 hover:bg-black/90 text-white'}`}
           >
             <Gauge className="w-4 h-4" />
             <span className="text-xs font-bold">{playbackRate === 1 ? '1x' : '0.25x'}</span>
@@ -238,7 +238,7 @@ const VideoControls = memo(({
             />
           </div>
 
-          <span className="text-[10px] font-mono text-gray-300 w-16 text-right">
+          <span className="text-[10px] font-mono text-white font-bold bg-black/75 rounded-full px-2.5 py-1 w-auto text-right">
             {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
           </span>
         </div>
@@ -341,7 +341,7 @@ export default function Home() {
   }, [sensitivity]);
 
   const playCoinSound = (audioCtx: AudioContext) => {
-    const t = audioCtx.currentTime;
+    const t = audioCtx.currentTime + 0.25;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
 
@@ -416,24 +416,19 @@ export default function Home() {
       if (ctx.state === 'suspended') ctx.resume();
 
       const t = ctx.currentTime;
-      const notes = [196.00, 164.81, 130.81]; // G3, E3, C3
-
-      notes.forEach((freq, i) => {
+      // Soft descending chime: A4 → F#4 → D4
+      ([[440, 0], [370, 0.13], [294, 0.26]] as [number, number][]).forEach(([freq, delay]) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(freq, t + (i * 0.15));
-
-        gain.gain.setValueAtTime(0, t + (i * 0.15));
-        gain.gain.linearRampToValueAtTime(0.1, t + (i * 0.15) + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + (i * 0.15) + 0.2);
-
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t + delay);
+        gain.gain.setValueAtTime(0, t + delay);
+        gain.gain.linearRampToValueAtTime(0.12, t + delay + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.35);
         osc.connect(gain);
         gain.connect(ctx.destination);
-
-        osc.start(t + (i * 0.15));
-        osc.stop(t + (i * 0.15) + 0.2);
+        osc.start(t + delay);
+        osc.stop(t + delay + 0.4);
       });
     } catch (e) {
       // Ignore
@@ -1983,9 +1978,14 @@ export default function Home() {
               {showNotes && (
                 <div className="absolute inset-x-0 bottom-32 px-6 z-50 animate-in slide-in-from-bottom duration-300">
                   <div className="max-w-xl mx-auto bg-gray-900/90 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl">
-                    <div className="flex items-center gap-2 mb-2 text-blue-400">
-                      <FileText className="w-5 h-5" />
-                      <h3 className="font-bold text-sm uppercase tracking-wider">Clip Notes</h3>
+                    <div className="flex items-center justify-between mb-2 text-blue-400">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-5 h-5" />
+                        <h3 className="font-bold text-sm uppercase tracking-wider">Clip Notes</h3>
+                      </div>
+                      <button onClick={() => setShowNotes(false)} className="p-1 rounded-md text-gray-400 hover:text-white transition-colors">
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                     <textarea
                       value={shotNotes[selectedClipIndex]}
