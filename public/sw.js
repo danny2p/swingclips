@@ -1,12 +1,11 @@
-const CACHE_NAME = 'swingclips-cache-v16';
+const CACHE_NAME = 'swingclips-cache-v17';
 const PRE_CACHE = [
   '/',
   '/manifest.json',
   '/favicon.png',
   '/gg-logo-square.png',
   '/ffmpeg/ffmpeg-core.js',
-  '/ffmpeg/ffmpeg-core.wasm',
-  '/ffmpeg/ffmpeg-core.worker.js'
+  '/ffmpeg/ffmpeg-core.wasm'
 ];
 
 self.addEventListener('install', (event) => {
