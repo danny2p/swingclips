@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
-import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, ZoomIn, Star, Plus, Minus } from 'lucide-react';
-import { processSwings, burnLinesToVideo, resetFFmpeg, extractThumbnail, THUMBNAIL_OFFSET, clearDebugLog } from '@/utils/videoProcessor';
-import { Session, getAllSessions, saveSession, deleteSession, getSession, getStoredConfig, saveStoredConfig, AppConfig } from '@/utils/db';
+import { Video, Square, Loader2, RotateCcw, Download, Archive, X, ChevronLeft, ChevronRight, Share2, FileText, ClipboardList, Eraser, Play, Pause, Gauge, History, Trash2, Circle as CircleIcon, Camera, Star, Plus, Minus } from 'lucide-react';
+import { processSwings, burnLinesToVideo, resetFFmpeg, clearDebugLog, getDebugLog } from '@/utils/videoProcessor';
+import { Session, getAllSessions, saveSession, deleteSession, getSession } from '@/utils/db';
 import JSZip from 'jszip';
 
 // Sequential DB queue to prevent overlapping transactions and data corruption on mobile
@@ -293,8 +293,6 @@ export default function Home() {
   const [showDeviceToast, setShowDeviceToast] = useState(false);
   const [sensitivity, setSensitivity] = useState(100);
   const sensitivityRef = useRef(100);
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [maxZoom, setMaxZoom] = useState(1);
 
   // Real-time audio tracking
   const [shotCount, setShotCount] = useState(0);
@@ -463,7 +461,6 @@ export default function Home() {
   const [showNotes, setShowNotes] = useState(false);
   const [favorites, setFavorites] = useState<boolean[]>([]);
   const [clipByteSizes, setClipByteSizes] = useState<(number | null)[]>([]);
-  const [migrationProgress, setMigrationProgress] = useState<string | null>(null);
   const holdStepCountRef = useRef(0);
 
   // Recording Timer & Limits
@@ -667,6 +664,7 @@ export default function Home() {
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const wasPlayingBeforeScrub = useRef(false);
+  const downloadLongPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const togglePlay = () => {
     if (mainVideoRef.current) {
@@ -1012,86 +1010,6 @@ export default function Home() {
   };
 
   // DB Operations
-  // Runs background migrations when env-var-driven config changes between deploys.
-  // Three guarantees:
-  //   1. Re-reads each session fresh from DB before saving to avoid overwriting
-  //      concurrent user changes (notes, favorites) made mid-migration.
-  //   2. Saves thumbnailOffset per-session as each one completes, so a partial
-  //      run (e.g. app exit) resumes where it left off rather than restarting.
-  //   3. Updates the active gallery's thumbnail state if the open session is
-  //      among those migrated, so the user sees updated images immediately.
-  const runMigrations = async () => {
-    try {
-      const currentConfig: AppConfig = { thumbnailOffset: THUMBNAIL_OFFSET };
-      const storedConfig = await getStoredConfig();
-
-      const needsThumbnailRegen =
-        storedConfig === null || storedConfig.thumbnailOffset !== currentConfig.thumbnailOffset;
-
-      if (!needsThumbnailRegen) return;
-
-      const sessions = await getAllSessions();
-
-      // Only count sessions that still need processing (not already migrated to this offset)
-      const clipsToProcess = sessions.flatMap(s =>
-        s.thumbnailOffset === currentConfig.thumbnailOffset
-          ? []
-          : s.clips.filter(c => c.data.byteLength > 0)
-      );
-
-      if (clipsToProcess.length === 0) {
-        await saveStoredConfig(currentConfig);
-        return;
-      }
-
-      let processed = 0;
-      setMigrationProgress(`Updating thumbnails (${processed}/${clipsToProcess.length})…`);
-
-      for (const session of sessions) {
-        // Skip sessions already migrated to this offset (survived a previous partial run)
-        if (session.thumbnailOffset === currentConfig.thumbnailOffset) continue;
-
-        // Fix #1: re-read fresh from DB so we don't overwrite any user changes
-        // (notes, favorites) that happened while we were processing earlier sessions.
-        const freshSession = await getSession(session.id);
-        if (!freshSession) continue;
-
-        let sessionChanged = false;
-        for (let i = 0; i < freshSession.clips.length; i++) {
-          const clip = freshSession.clips[i];
-          if (clip.data.byteLength === 0) continue;
-          try {
-            const blob = new Blob([new Uint8Array(clip.data)], { type: 'video/mp4' });
-            const thumbnail = await extractThumbnail(blob);
-            freshSession.clips[i] = { ...clip, thumbnail };
-            sessionChanged = true;
-          } catch (e) {
-            console.warn(`Thumbnail migration failed for clip ${i} in session ${session.id}:`, e);
-          }
-          processed++;
-          setMigrationProgress(`Updating thumbnails (${processed}/${clipsToProcess.length})…`);
-        }
-
-        if (sessionChanged) {
-          // Fix #2: stamp the offset on the session so it's skipped on next run
-          await saveSession({ ...freshSession, thumbnailOffset: currentConfig.thumbnailOffset });
-
-          // Fix #3: if this is the currently-open session, update the gallery immediately
-          if (currentSessionIdRef.current === freshSession.id) {
-            setThumbnails(freshSession.clips.map(c => c.thumbnail || null));
-          }
-        }
-      }
-
-      await saveStoredConfig(currentConfig);
-      await loadHistory();
-    } catch (e) {
-      console.warn('Migration failed:', e);
-    } finally {
-      setMigrationProgress(null);
-    }
-  };
-
   const loadHistory = async () => {
     try {
       const data = await getAllSessions();
@@ -1242,8 +1160,7 @@ export default function Home() {
       setActiveStream(stream);
       if (videoRef.current) videoRef.current.srcObject = stream;
 
-      // Reset zoom state on camera switch
-      setZoomLevel(1);
+
 
       const track = stream.getVideoTracks()[0];
       const settings = track.getSettings();
@@ -1254,13 +1171,6 @@ export default function Home() {
         console.log(`Camera active: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
       } else {
         frameRateRef.current = 30; // Fallback
-      }
-
-      const capabilities = track.getCapabilities && track.getCapabilities() as any;
-      if (capabilities && capabilities.zoom) {
-        setMaxZoom(capabilities.zoom.max);
-      } else {
-        setMaxZoom(1);
       }
 
       // Enumerate devices now that we have permissions
@@ -1286,7 +1196,6 @@ export default function Home() {
 
   useEffect(() => {
     loadHistory();
-    runMigrations();
   }, []);
 
   const toggleCamera = () => {
@@ -1307,20 +1216,6 @@ export default function Home() {
     setTimeout(() => setShowDeviceToast(false), 2000);
   };
 
-  const toggleZoom = async () => {
-    if (!streamRef.current || maxZoom <= 1) return;
-    const track = streamRef.current.getVideoTracks()[0];
-
-    let nextZoom = zoomLevel === 1 ? 2 : (zoomLevel === 2 && maxZoom >= 5) ? 5 : 1;
-    if (nextZoom > maxZoom) nextZoom = 1;
-
-    try {
-      await track.applyConstraints({ advanced: [{ zoom: nextZoom }] } as any);
-      setZoomLevel(nextZoom);
-    } catch (err) {
-      console.error("Zoom not supported or failed", err);
-    }
-  };
 
   useEffect(() => {
     // Only run when in camera view and we have a stream
@@ -1758,12 +1653,6 @@ export default function Home() {
   return (
     <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden select-none">
 
-      {migrationProgress && (
-        <div className="fixed bottom-4 inset-x-4 z-50 flex items-center gap-2 px-4 py-3 bg-gray-900/95 border border-gray-700 rounded-xl shadow-2xl backdrop-blur-md text-xs text-gray-300 font-medium">
-          <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0 text-blue-400" />
-          {migrationProgress}
-        </div>
-      )}
 
       {appState === 'camera' && (
         <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
@@ -1773,12 +1662,6 @@ export default function Home() {
             <div className="flex flex-col items-end gap-3">
               {!isRecording && (
                 <div className="flex gap-3">
-                  {maxZoom > 1 && (
-                    <button onClick={toggleZoom} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90 flex items-center justify-center gap-1 relative">
-                      <ZoomIn className="w-6 h-6 text-white" />
-                      <span className="absolute -bottom-1 -right-1 bg-blue-600 text-[9px] font-bold px-1 rounded-full">{zoomLevel}x</span>
-                    </button>
-                  )}
                   <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><History className="w-6 h-6 text-white" /></button>
                   <button onClick={toggleCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><Camera className="w-6 h-6 text-white" /></button>
                 </div>
@@ -2060,7 +1943,19 @@ export default function Home() {
                     <Star className={`w-5 h-5 ${selectedClipIndex !== null && favorites[selectedClipIndex] ? 'fill-current' : ''}`} />
                   </button>
                   <button onClick={handleFullscreenShare} className="p-2.5 bg-green-600 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Share"><Share2 className="w-5 h-5" /></button>
-                  <button onClick={handleFullscreenDownload} className="p-2.5 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Download"><Download className="w-5 h-5" /></button>
+                  <button
+                    onClick={handleFullscreenDownload}
+                    onPointerDown={() => {
+                      downloadLongPressRef.current = setTimeout(() => {
+                        downloadLongPressRef.current = null;
+                        navigator.clipboard.writeText(getDebugLog()).catch(() => {});
+                      }, 700);
+                    }}
+                    onPointerUp={() => { clearTimeout(downloadLongPressRef.current ?? undefined); downloadLongPressRef.current = null; }}
+                    onPointerLeave={() => { clearTimeout(downloadLongPressRef.current ?? undefined); downloadLongPressRef.current = null; }}
+                    className="p-2.5 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"
+                    title="Download (long-press to copy debug log)"
+                  ><Download className="w-5 h-5" /></button>
                   <button
                     onClick={(e) => selectedClipIndex !== null && deleteClip(selectedClipIndex, e)}
                     className="p-2.5 bg-gray-800 text-red-400 rounded-full shadow-lg active:scale-90 transition-transform hover:bg-red-900/40"

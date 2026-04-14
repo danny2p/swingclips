@@ -1,4 +1,4 @@
-const CACHE_NAME = 'swingclips-cache-v17';
+const CACHE_NAME = 'swingclips-cache-v18';
 const PRE_CACHE = [
   '/',
   '/manifest.json',

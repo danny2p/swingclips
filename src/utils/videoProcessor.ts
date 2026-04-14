@@ -60,6 +60,9 @@ export async function resetFFmpeg() {
   }
 }
 
+// Per-exec timeout: prevents Android from hanging indefinitely if FFmpeg stalls.
+const EXEC_TIMEOUT_MS = 30_000;
+
 export async function initFFmpeg(onProgress: (msg: string) => void): Promise<FFmpeg> {
   if (ffmpeg && (ffmpeg as any).isLoaded) { scLog('initFFmpeg: reusing loaded instance'); return ffmpeg; }
   if (loadPromise) { scLog('initFFmpeg: joining in-progress load'); return loadPromise; }
@@ -186,13 +189,14 @@ export async function processSwings(
     onProgress(`Slicing swing ${i + 1} of ${impacts.length}...`);
     scLog(`Clip ${i + 1}: start=${startTime.toFixed(2)}s input=${activeInputFile}`);
     try {
-      await fm.exec([
+      const clipRet = await fm.exec([
         '-ss', startTime.toString(),
         '-i', activeInputFile,
         '-t', duration.toString(),
         '-c', 'copy',
         outputFileName
-      ]);
+      ], EXEC_TIMEOUT_MS);
+      if (clipRet !== 0) throw new Error(`clip exec returned ${clipRet}`);
       scLog(`Clip ${i + 1}: clip exec done, reading file...`);
 
       const data = await fm.readFile(outputFileName);
@@ -200,26 +204,31 @@ export async function processSwings(
       const clipBlob = new Blob([new Uint8Array(data as any)], { type: 'video/mp4' });
       const url = URL.createObjectURL(clipBlob);
 
-      await fm.exec([
-        '-ss', (startTime + THUMBNAIL_OFFSET).toString(),
-        '-i', activeInputFile,
+      // Extract thumbnail from the output clip (not the full session video).
+      // Seeking within the small 4-second clip is much cheaper than seeking
+      // through the full session video on Android's hardware decoder.
+      const thumbRet = await fm.exec([
+        '-ss', THUMBNAIL_OFFSET.toString(),
+        '-i', outputFileName,
         '-vframes', '1',
         '-q:v', '4',
         '-update', '1',
         '-f', 'image2',
         thumbFileName
-      ]);
+      ], EXEC_TIMEOUT_MS);
+      if (thumbRet !== 0) throw new Error(`thumb exec returned ${thumbRet}`);
       scLog(`Clip ${i + 1}: thumb exec done, reading file...`);
 
       const thumbData = await fm.readFile(thumbFileName);
       scLog(`Clip ${i + 1}: thumb readFile done (${(thumbData as any).length} bytes)`);
       const thumbnail = new Uint8Array(thumbData as any);
 
-      scLog(`Clip ${i + 1} ready, size=${clipBlob.size}`);
-      if (onClipReady) await onClipReady(i, url, clipBlob, thumbnail);
-
+      // Free WASM heap before the JS-level onClipReady work (Base64, IndexedDB).
       await fm.deleteFile(outputFileName);
       await fm.deleteFile(thumbFileName);
+
+      scLog(`Clip ${i + 1} ready, size=${clipBlob.size}`);
+      if (onClipReady) await onClipReady(i, url, clipBlob, thumbnail);
     } catch (err) {
       scError(`Clip ${i + 1} FAILED`, err);
       onProgress(`Error on swing ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
