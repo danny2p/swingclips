@@ -4,14 +4,17 @@
 
 It transforms your mobile device into a swing recording and review station, automatically detecting ball impacts by sound and generating perfectly sliced clips for immediate feedback.
 
+As my YouTube channel is focused on Garage Golf (https://www.youtube.com/@garagegolfers), that's the space this app is intended for. It relies on detecting the sound of your impact to slice each clip.  This will probably work outside in your backyard net, but won't work well at a crowded/loud driving range.
+
 ---
 
 ## 💡 How to Use
 
 1. **Set Up:** Place your phone on a tripod or stand facing your swing path. (https://amzn.to/4mqd6VZ is the $20 tripid I use, this is an affiliate link and buying through this link helps support development)
+2. **Check Audio:** Before hitting record, ensure a loud soud like a clap, or golf club impact triggers the audio preview meter and should register an audible chime. Sensitivity defaults to max (100), but you can reduce sensitivity if your environment is a little noisier.
 2. **Record:** Tap the Record button.
-3. **Swing:** Hit as many balls as you like. Wait ~3 seconds between shots.
-4. **Review:** Stop recording and wait for processing. Each swing will appear in your gallery with full analysis tools (Slow-mo, Drawing) ready to go.
+3. **Swing:** Hit as many balls as you like. Wait ~3 seconds between shots. The app essentially mutes for 3 seconds to reduce registration of peripheral sounds.
+4. **Review:** Stop recording and wait for processing. Each swing will appear in your gallery with full analysis tools (Slow-mo, Drawing, Notes) ready to go.
 
 ---
 
@@ -23,13 +26,13 @@ It transforms your mobile device into a swing recording and review station, auto
 - **High Sensitivity:** Fine-tuned to catch even quiet shots while filtering out background noise.
 
 ### 🎥 Advanced Video Review
-- **Silky-Smooth Scrubbing:** Custom-engineered video engine (FFmpeg) re-encodes clips with frequent keyframes for a native-feeling, frame-by-frame review experience.
+- **Frame-by-frame stepping:** Optimized video engine (FFmpeg) re-encodes clips with frequent keyframes for a native-feeling, frame-by-frame review experience.
 - **Slow-Motion Playback:** Toggle between normal speed and **0.25x speed** to analyze every detail of your tempo and form.
 - **Telestrator (Drawing):** Draw directly on the screen with your finger to analyze swing planes, head movement, and alignment.
 
-### 📱 Built for the Range
+### 📱 Local Processing and Storage
 - **PWA Support:** Install SwingClips as a standalone app on your iPhone or Android device.
-- **Native Sharing:** Use the built-in Share button to save swings directly to your **Photos/Gallery** or share them via text/social media.
+- **Native Sharing:** Use the built-in Share and Download button to save annotated swings directly to your device or share them via text/social media.
 - **Session Reporting:** Add notes to individual swings or the entire session, and export everything as a convenient ZIP archive.
 
 ---
