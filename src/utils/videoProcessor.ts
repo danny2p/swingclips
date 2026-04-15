@@ -254,10 +254,9 @@ export async function processSwings(
     } catch (err) {
       scError(`Clip ${i + 1} FAILED`, err);
       onProgress(`Error on swing ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
-      // A timeout means the Worker is likely dead — reset before the next clip.
-      if (err instanceof Error && err.message.includes('timed out')) {
-        needsEngineReset = true;
-      }
+      // Any error (timeout, WASM crash, non-zero return) means the engine
+      // state is unknown — always reset before attempting the next clip.
+      needsEngineReset = true;
     }
   }
 
