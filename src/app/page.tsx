@@ -423,7 +423,7 @@ export default function Home() {
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(freq, t + delay);
         gain.gain.setValueAtTime(0, t + delay);
-        gain.gain.linearRampToValueAtTime(0.12, t + delay + 0.01);
+        gain.gain.linearRampToValueAtTime(0.25, t + delay + 0.01);
         gain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.35);
         osc.connect(gain);
         gain.connect(ctx.destination);
