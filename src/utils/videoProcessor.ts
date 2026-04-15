@@ -176,6 +176,23 @@ export async function processSwings(
 
   let activeInputFile = await writeInputFile(activeFm);
 
+  // Warm-up exec (non-iOS only): forces FFmpeg's lazy internal initialization
+  // (codec/format registry, allocator layout) to complete on a clean heap
+  // before any real clip work. Without this, the first thumbnail exec
+  // consistently crashes with RuntimeError: memory access out of bounds on
+  // Android Chrome, while clips 2+ (which run on a post-reset heap) succeed.
+  // iOS already runs a faststart exec in writeInputFile which serves the same
+  // purpose, explaining why it doesn't have this problem.
+  if (!isIOS) {
+    try {
+      scLog('Warm-up exec: start');
+      const warmRet = await execWithTimeout(activeFm, ['-version'], 'warmup');
+      scLog(`Warm-up exec: done (ret=${warmRet})`);
+    } catch (err) {
+      scError('Warm-up exec failed (non-fatal, continuing)', err);
+    }
+  }
+
   // When a clip operation fails (exec timeout or Worker death), set this flag.
   // The next iteration will reset + reinitialise FFmpeg before attempting the clip.
   // The "fresh engine reset every 10 clips" strategy has been removed: re-writing
