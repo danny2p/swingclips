@@ -1676,24 +1676,7 @@ export default function Home() {
         <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover absolute inset-0 z-0" />
           <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
-            <div className="flex items-center gap-3">
-              <a
-                href="https://www.garage.golf/"
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Garage Golfers"
-                className="shrink-0"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/garage-golfers-logo.png"
-                  alt="Garage Golfers"
-                  className="h-8 w-auto brightness-0 invert drop-shadow-md"
-                />
-              </a>
-              <div className="h-6 w-px bg-white/25" />
-              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
-            </div>
+            <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
             <div className="flex flex-col items-end gap-3">
               {!isRecording && (
                 <div className="flex gap-3">
