@@ -39,7 +39,7 @@ const GalleryGrid = memo(({
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
       {clips.map((clipUrl, idx) => (
-        <div key={idx} onClick={() => clipUrl && onSelect(idx)} className={`relative group bg-gray-900 rounded-xl overflow-hidden shadow-xl border border-gray-800 transition-transform ${clipUrl ? 'cursor-pointer active:scale-95' : 'opacity-70'}`}>
+        <div key={idx} onClick={() => clipUrl && onSelect(idx)} className={`relative group bg-black/25 rounded-xl overflow-hidden shadow-xl border border-white/10 transition-transform ${clipUrl ? 'cursor-pointer active:scale-95' : 'opacity-70'}`}>
           <div className="aspect-[3/4] bg-black relative flex items-center justify-center">
             {clipUrl ? (
               <>
@@ -51,14 +51,14 @@ const GalleryGrid = memo(({
                   />
                 ) : (
                   <div className="flex flex-col items-center text-center p-4">
-                    <Loader2 className="w-6 h-6 animate-spin text-blue-500/30 mb-2" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-700">Loading...</span>
+                    <Loader2 className="w-6 h-6 animate-spin text-emerald-400/30 mb-2" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-white/20">Loading...</span>
                   </div>
                 )}
-                {shotNotes[idx] && <div className="absolute top-2 right-2 bg-blue-600 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
+                {shotNotes[idx] && <div className="absolute top-2 right-2 bg-emerald-500 p-1 rounded shadow-lg"><FileText className="w-3 h-3 text-white" /></div>}
                 {clipByteSizes[idx] != null && (
                   <div className="absolute bottom-2 left-2 z-10">
-                    <span className="bg-black/70 text-gray-300 text-[9px] font-mono px-1.5 py-0.5 rounded-full backdrop-blur-sm">
+                    <span className="bg-black/70 text-white/80 text-[9px] font-mono px-1.5 py-0.5 rounded-full backdrop-blur-sm">
                       {clipByteSizes[idx]! < 1024 * 1024
                         ? `${Math.round(clipByteSizes[idx]! / 1024)}KB`
                         : `${(clipByteSizes[idx]! / (1024 * 1024)).toFixed(1)}MB`}
@@ -74,18 +74,18 @@ const GalleryGrid = memo(({
               </>
             ) : (
               <div className="flex flex-col items-center text-center p-4">
-                <Loader2 className="w-8 h-8 animate-spin text-blue-500/50 mb-2" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600">Slicing...</span>
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-400/50 mb-2" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-white/30">Slicing...</span>
               </div>
             )}
           </div>
-          <div className="p-3 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm border-t border-gray-800">
-            <span className="text-xs font-bold text-gray-400">Swing #{idx + 1}</span>
+          <div className="p-3 flex items-center justify-between bg-black/40 backdrop-blur-sm border-t border-white/10">
+            <span className="text-xs font-bold text-white/60">Swing #{idx + 1}</span>
             {clipUrl && (
               <div className="flex gap-2">
-                <button onClick={(e) => onDelete(idx, e)} className="p-1.5 bg-gray-800 hover:bg-red-900/50 rounded-md text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
-                <button onClick={(e) => { e.stopPropagation(); onShare(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-green-400 transition-colors"><Share2 className="w-4 h-4" /></button>
-                <button onClick={(e) => { e.stopPropagation(); onDownload(clipUrl, idx); }} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-blue-400 transition-colors"><Download className="w-4 h-4" /></button>
+                <button onClick={(e) => onDelete(idx, e)} className="p-1.5 bg-white/10 hover:bg-red-900/50 rounded-md text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); onShare(clipUrl, idx); }} className="p-1.5 bg-white/10 hover:bg-white/15 rounded-md text-green-400 transition-colors"><Share2 className="w-4 h-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); onDownload(clipUrl, idx); }} className="p-1.5 bg-white/10 hover:bg-white/15 rounded-md text-emerald-400 transition-colors"><Download className="w-4 h-4" /></button>
               </div>
             )}
           </div>
@@ -107,26 +107,26 @@ const HistoryList = memo(({ sessions, currentSessionId, onLoad, onDelete }: Hist
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
       {sessions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+        <div className="flex flex-col items-center justify-center py-20 text-white/50">
           <History className="w-12 h-12 mb-4 opacity-20" />
           <p>No saved sessions yet.</p>
         </div>
       ) : (
         sessions.map((session) => (
-          <div key={session.id} onClick={() => onLoad(session)} className="bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg cursor-pointer hover:border-blue-500/50 transition-all active:scale-[0.98]">
+          <div key={session.id} onClick={() => onLoad(session)} className="bg-black/25 rounded-xl p-4 border border-white/10 shadow-lg cursor-pointer hover:border-emerald-400/50 transition-all active:scale-[0.98]">
             <div className="flex justify-between items-start mb-3">
               <div>
                 <h3 className="font-bold text-white">{session.sessionName || new Date(session.id).toLocaleDateString()}</h3>
-                <p className="text-xs text-gray-500">{session.sessionName ? new Date(session.id).toLocaleDateString() + ' • ' : ''}{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
+                <p className="text-xs text-white/50">{session.sessionName ? new Date(session.id).toLocaleDateString() + ' • ' : ''}{new Date(session.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {session.clips.length} swings</p>
               </div>
-              <button onClick={(e) => onDelete(e, session.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+              <button onClick={(e) => onDelete(e, session.id)} className="p-2 text-white/50 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
             </div>
             {session.sessionNotes && (
-              <p className="text-xs text-gray-400 line-clamp-2 bg-black/30 p-2 rounded italic">&quot;{session.sessionNotes}&quot;</p>
+              <p className="text-xs text-white/60 line-clamp-2 bg-black/30 p-2 rounded italic">&quot;{session.sessionNotes}&quot;</p>
             )}
             <div className="flex gap-2 mt-3 overflow-hidden h-12">
               {session.clips.slice(0, 5).map((clip, idx) => (
-                <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-gray-800">
+                <div key={idx} className="aspect-[3/4] h-full bg-black rounded overflow-hidden border border-white/10">
                   {clip.thumbnail ? (
                     <img
                       src={clip.thumbnail}
@@ -134,14 +134,14 @@ const HistoryList = memo(({ sessions, currentSessionId, onLoad, onDelete }: Hist
                       alt={`Swing ${idx + 1}`}
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gray-800">
-                      <Video className="w-4 h-4 text-gray-600" />
+                    <div className="w-full h-full flex items-center justify-center bg-white/10">
+                      <Video className="w-4 h-4 text-white/30" />
                     </div>
                   )}
                 </div>
               ))}
               {session.clips.length > 5 && (
-                <div className="h-full aspect-square bg-gray-800 rounded flex items-center justify-center text-[10px] font-bold text-gray-500">+{session.clips.length - 5}</div>
+                <div className="h-full aspect-square bg-white/10 rounded flex items-center justify-center text-[10px] font-bold text-white/50">+{session.clips.length - 5}</div>
               )}
             </div>
           </div>
@@ -208,7 +208,7 @@ const VideoControls = memo(({
 
           <button
             onClick={onTogglePlaybackRate}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all active:scale-90 ml-4 ${playbackRate === 0.25 ? 'bg-blue-600 text-white' : 'bg-black/75 hover:bg-black/90 text-white'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all active:scale-90 ml-4 ${playbackRate === 0.25 ? 'bg-emerald-500 text-white' : 'bg-black/75 hover:bg-black/90 text-white'}`}
           >
             <Gauge className="w-4 h-4" />
             <span className="text-xs font-bold">{playbackRate === 1 ? '1x' : '0.25x'}</span>
@@ -229,11 +229,11 @@ const VideoControls = memo(({
               onMouseUp={onScrubEnd}
               onTouchStart={onScrubStart}
               onTouchEnd={onScrubEnd}
-              className="w-full h-1.5 bg-gray-600 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all focus:outline-none"
+              className="w-full h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer accent-emerald-400 hover:accent-emerald-300 transition-all focus:outline-none"
             />
             {/* Custom Progress Bar background to show "filled" portion */}
             <div
-              className="absolute left-0 top-[10px] h-1.5 bg-blue-500 rounded-full pointer-events-none"
+              className="absolute left-0 top-[10px] h-1.5 bg-emerald-500 rounded-full pointer-events-none"
               style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
             />
           </div>
@@ -1618,54 +1618,97 @@ export default function Home() {
   };
 
   if (showIntro === null) {
-    return <main className="fixed inset-0 bg-black" />;
+    return <main className="fixed inset-0" />;
   }
 
   if (showIntro) {
     return (
-      <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden select-none">
+      <main className="fixed inset-0 text-white flex flex-col font-sans overflow-hidden select-none">
         <div className="flex-1 flex flex-col items-center justify-center p-8 max-w-md mx-auto text-center animate-in fade-in duration-500">
-          <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mb-8 shadow-2xl shadow-blue-500/20">
-            <Video className="w-10 h-10 text-white" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/garage-golfers-logo.png"
+            alt="Garage Golfers"
+            className="h-12 w-auto brightness-0 invert mb-8 drop-shadow-[0_4px_24px_rgba(16,185,129,0.25)]"
+          />
+          <div className="w-16 h-16 bg-emerald-500 ring-1 ring-emerald-300/40 rounded-2xl flex items-center justify-center mb-6 shadow-2xl shadow-emerald-500/30">
+            <Video className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-bold mb-4 tracking-tight">Welcome to SwingClips</h1>
-          <p className="text-gray-300 text-lg leading-relaxed mb-12">
+          <p className="text-white/80 text-lg leading-relaxed mb-8">
             Record yourself hitting some balls and this app creates clips of each strike with tools for reviewing each shot.
             <br /><br />
-            <span className="text-blue-400 font-semibold">Shots are detected by impact sound</span>, so this works best in an indoor or isolated setting.
+            <span className="text-emerald-400 font-semibold">Shots are detected by impact sound</span>, so this works best in an indoor or isolated setting.
           </p>
-          <p className="text-gray-300 text-lg leading-relaxed mb-12">You'll see an audio preview on the next screen where you can dial in sensitivity for shot detection.</p>
+          <p className="text-white/70 text-base leading-relaxed mb-10">You&apos;ll see an audio preview on the next screen where you can dial in sensitivity for shot detection.</p>
           <button
             onClick={dismissIntro}
-            className="w-full py-4 bg-white text-black font-bold text-lg rounded-xl shadow-lg active:scale-95 transition-transform"
+            className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-lg rounded-xl shadow-lg shadow-emerald-900/40 active:scale-95 transition-transform"
           >
             Get Started
           </button>
           {sessions.length > 0 && (
             <button
               onClick={() => { setShowIntro(false); setAppState('history'); }}
-              className="w-full py-4 mt-3 bg-transparent border border-gray-600 text-gray-300 font-semibold text-lg rounded-xl active:scale-95 transition-transform"
+              className="w-full py-4 mt-3 bg-transparent border border-white/15 text-white/80 font-semibold text-lg rounded-xl active:scale-95 transition-transform hover:bg-white/5"
             >
               View History
             </button>
           )}
+          <a
+            href="https://www.youtube.com/@garagegolfers"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-10 text-[11px] text-white/40 hover:text-white/70 transition-colors"
+          >
+            Created by Danny at Garage Golfers ↗
+          </a>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="fixed inset-0 bg-black text-white flex flex-col font-sans overflow-hidden select-none">
+    <main className="fixed inset-0 text-white flex flex-col font-sans overflow-hidden select-none">
 
 
       {appState === 'camera' && (
         <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
           <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover absolute inset-0 z-0" />
           <div className="absolute inset-x-0 top-0 p-6 z-10 flex justify-between items-start bg-gradient-to-b from-black/80 to-transparent">
-            <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
+            <div className="flex items-center gap-3">
+              <a
+                href="https://www.garage.golf/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Garage Golfers"
+                className="shrink-0"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/garage-golfers-logo.png"
+                  alt="Garage Golfers"
+                  className="h-8 w-auto brightness-0 invert drop-shadow-md"
+                />
+              </a>
+              <div className="h-6 w-px bg-white/25" />
+              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SwingClips</h1>
+            </div>
             <div className="flex flex-col items-end gap-3">
               {!isRecording && (
                 <div className="flex gap-3">
+                  <a
+                    href="https://www.youtube.com/@garagegolfers"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Garage Golfers on YouTube"
+                    title="YouTube"
+                    className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90 inline-flex items-center justify-center"
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="text-white" aria-hidden="true">
+                      <path d="m10 15l5.19-3L10 9zm11.56-7.83c.13.47.22 1.1.28 1.9c.07.8.1 1.49.1 2.09L22 12c0 2.19-.16 3.8-.44 4.83c-.25.9-.83 1.48-1.73 1.73c-.47.13-1.33.22-2.65.28c-1.3.07-2.49.1-3.59.1L12 19c-4.19 0-6.8-.16-7.83-.44c-.9-.25-1.48-.83-1.73-1.73c-.13-.47-.22-1.1-.28-1.9c-.07-.8-.1-1.49-.1-2.09L2 12c0-2.19.16-3.8.44-4.83c.25-.9.83-1.48 1.73-1.73c.47-.13 1.33-.22 2.65-.28c1.3-.07 2.49-.1 3.59-.1L12 5c4.19 0 6.8.16 7.83.44c.9.25 1.48.83 1.73 1.73" />
+                    </svg>
+                  </a>
                   <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><History className="w-6 h-6 text-white" /></button>
                   <button onClick={toggleCamera} className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90"><Camera className="w-6 h-6 text-white" /></button>
                 </div>
@@ -1682,16 +1725,16 @@ export default function Home() {
           <div className="absolute inset-x-0 bottom-0 pb-12 pt-24 bg-gradient-to-t from-black/80 to-transparent z-10 flex flex-col items-center justify-end pointer-events-none">
             {!isRecording && (
               <div className="mb-8 flex flex-col items-center w-72 bg-black/40 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-2xl pointer-events-auto">
-                <div className="flex justify-between w-full text-[10px] font-bold text-gray-400 mb-3 uppercase tracking-widest">
+                <div className="flex justify-between w-full text-[10px] font-bold text-white/60 mb-3 uppercase tracking-widest">
                   <span>Audio Sensitivity Adjustment</span>
-                  <div className={`w-2 h-2 rounded-full transition-all duration-300 ${isPreflightTriggered ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-gray-600'}`}></div>
+                  <div className={`w-2 h-2 rounded-full transition-all duration-300 ${isPreflightTriggered ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-white/20'}`}></div>
                 </div>
 
                 {/* Audio Level Meter */}
-                <div className="w-full h-1.5 bg-gray-800 rounded-full relative mb-6 overflow-hidden">
+                <div className="w-full h-1.5 bg-white/10 rounded-full relative mb-6 overflow-hidden">
                   <div
                     ref={meterRef}
-                    className="h-full bg-blue-500/80 transition-[width] duration-75 ease-out"
+                    className="h-full bg-emerald-500/80 transition-[width] duration-75 ease-out"
                     style={{ width: '0%' }}
                   />
                   <div
@@ -1711,7 +1754,7 @@ export default function Home() {
 
                   <div className="flex flex-col items-center">
                     <span className="text-2xl font-black text-white tabular-nums">{sensitivity}</span>
-                    <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Sensitivity</span>
+                    <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-tighter">Sensitivity</span>
                   </div>
 
                   <button
@@ -1731,10 +1774,10 @@ export default function Home() {
                 </div>
 
                 {/* Visual Audio Feedback during recording */}
-                <div className="w-48 h-1 bg-gray-800 rounded-full relative mb-4 overflow-hidden border border-white/5">
+                <div className="w-48 h-1 bg-white/10 rounded-full relative mb-4 overflow-hidden border border-white/5">
                   <div
                     ref={meterRef}
-                    className="h-full bg-blue-500/80 transition-[width] duration-75 ease-out"
+                    className="h-full bg-emerald-500/80 transition-[width] duration-75 ease-out"
                     style={{ width: '0%' }}
                   />
                   <div
@@ -1746,13 +1789,13 @@ export default function Home() {
                 <div className="bg-black/50 border border-white/20 backdrop-blur-md px-6 py-3 rounded-2xl shadow-xl flex flex-col items-center gap-1">
                   <div className="flex items-center gap-4">
                     <div className="flex flex-col items-center">
-                      <span className="text-white font-black text-xl tabular-nums">{shotCount}<span className="text-gray-500 text-sm font-bold">/{MAX_SHOTS}</span></span>
-                      <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Shots</span>
+                      <span className="text-white font-black text-xl tabular-nums">{shotCount}<span className="text-white/50 text-sm font-bold">/{MAX_SHOTS}</span></span>
+                      <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-tighter">Shots</span>
                     </div>
                     <div className="w-px h-8 bg-white/10"></div>
                     <div className="flex flex-col items-center">
-                      <span className="text-white font-black text-xl tabular-nums">{formatTime(recordingTime)}<span className="text-gray-500 text-sm font-bold">/{MAX_RECORDING_MINUTES}:00</span></span>
-                      <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Elapsed</span>
+                      <span className="text-white font-black text-xl tabular-nums">{formatTime(recordingTime)}<span className="text-white/50 text-sm font-bold">/{MAX_RECORDING_MINUTES}:00</span></span>
+                      <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-tighter">Elapsed</span>
                     </div>
                   </div>
                 </div>
@@ -1764,11 +1807,11 @@ export default function Home() {
       )}
 
       {appState === 'history' && (
-        <div className="flex-1 flex flex-col bg-gray-950 z-20 overflow-hidden">
-          <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
+        <div className="flex-1 flex flex-col bg-black/40 z-20 overflow-hidden">
+          <div className="p-4 pt-8 flex items-center justify-between border-b border-white/10 bg-black/25 shadow-md">
             <div className="flex items-center gap-3">
-              <button onClick={() => setAppState('camera')} className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"><ChevronLeft className="w-5 h-5" /></button>
-              <div><h1 className="text-lg font-bold text-white">History</h1><p className="text-xs text-gray-400">{sessions.length} sessions saved</p></div>
+              <button onClick={() => setAppState('camera')} className="p-2 bg-white/10 hover:bg-white/15 rounded-lg text-white/60"><ChevronLeft className="w-5 h-5" /></button>
+              <div><h1 className="text-lg font-bold text-white">History</h1><p className="text-xs text-white/60">{sessions.length} sessions saved</p></div>
             </div>
           </div>
           <HistoryList
@@ -1781,19 +1824,19 @@ export default function Home() {
       )}
 
       {appState === 'processing' && (
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center z-20 bg-gray-900">
-          <Loader2 className="w-16 h-16 animate-spin text-blue-500 mb-6" />
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center z-20 bg-black/25">
+          <Loader2 className="w-16 h-16 animate-spin text-emerald-400 mb-6" />
           <h2 className="text-2xl font-bold mb-2 uppercase tracking-tighter text-white">Processing</h2>
-          <p className="text-gray-400 font-medium px-4 py-2 bg-black/40 rounded-lg">{progressText}</p>
+          <p className="text-white/60 font-medium px-4 py-2 bg-black/40 rounded-lg">{progressText}</p>
         </div>
       )}
 
       {appState === 'gallery' && (
-        <div className="flex-1 flex flex-col bg-gray-950 z-20 overflow-hidden">
-          <div className="p-4 pt-8 flex items-center justify-between border-b border-gray-800 bg-gray-900 shadow-md">
-            <div><h1 className="text-lg font-bold text-white">Session Gallery</h1><p className="text-xs text-gray-400">{clips.length} swings captured</p></div>
+        <div className="flex-1 flex flex-col bg-black/40 z-20 overflow-hidden">
+          <div className="p-4 pt-8 flex items-center justify-between border-b border-white/10 bg-black/25 shadow-md">
+            <div><h1 className="text-lg font-bold text-white">Session Gallery</h1><p className="text-xs text-white/60">{clips.length} swings captured</p></div>
             <div className="flex gap-2">
-              <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><History className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">History</span></button>
+              <button onClick={() => { loadHistory(); setAppState('history'); }} className="p-2 px-3 bg-white/10 hover:bg-white/15 rounded-lg transition-colors flex items-center gap-2"><History className="w-4 h-4 text-white/80" /><span className="text-sm font-semibold text-white/80">History</span></button>
               <button
                 onClick={downloadAllAsZip}
                 onPointerDown={() => {
@@ -1804,22 +1847,22 @@ export default function Home() {
                 }}
                 onPointerUp={() => { clearTimeout(downloadLongPressRef.current ?? undefined); downloadLongPressRef.current = null; }}
                 onPointerLeave={() => { clearTimeout(downloadLongPressRef.current ?? undefined); downloadLongPressRef.current = null; }}
-                className="p-2 px-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2"
+                className="p-2 px-3 bg-emerald-500 hover:bg-emerald-600 rounded-lg transition-colors flex items-center gap-2"
                 title="ZIP All (long-press to copy debug log)"
               ><Archive className="w-4 h-4 text-white" /><span className="text-sm font-semibold text-white">ZIP All</span></button>
-              <button onClick={resetApp} className="p-2 px-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-2"><RotateCcw className="w-4 h-4 text-gray-300" /><span className="text-sm font-semibold text-gray-300">New</span></button>
+              <button onClick={resetApp} className="p-2 px-3 bg-white/10 hover:bg-white/15 rounded-lg transition-colors flex items-center gap-2"><RotateCcw className="w-4 h-4 text-white/80" /><span className="text-sm font-semibold text-white/80">New</span></button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto bg-gray-950">
+          <div className="flex-1 overflow-y-auto bg-black/40">
             <div className="p-4 max-w-7xl mx-auto w-full">
               <div className="flex flex-col md:flex-row gap-4 mb-6">
-                <div className="flex-1 bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg">
-                  <div className="flex items-center gap-2 mb-2 text-blue-400"><FileText className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Session Name</h3></div>
-                  <input type="text" value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="e.g. 7-Iron Drills..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" />
+                <div className="flex-1 bg-black/25 rounded-xl p-4 border border-white/10 shadow-lg">
+                  <div className="flex items-center gap-2 mb-2 text-emerald-400"><FileText className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-emerald-400">Session Name</h3></div>
+                  <input type="text" value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="e.g. 7-Iron Drills..." className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white/90 placeholder:text-white/30 focus:ring-1 focus:ring-emerald-400 focus:border-emerald-400 outline-none transition-all" />
                 </div>
-                <div className="flex-1 bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-lg">
-                  <div className="flex items-center gap-2 mb-2 text-blue-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-blue-400">Overall Session Notes</h3></div>
-                  <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Focus: Keeping head still..." className="w-full bg-black/40 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[45px]" />
+                <div className="flex-1 bg-black/25 rounded-xl p-4 border border-white/10 shadow-lg">
+                  <div className="flex items-center gap-2 mb-2 text-emerald-400"><ClipboardList className="w-5 h-5" /><h3 className="font-bold text-sm uppercase tracking-wider text-emerald-400">Overall Session Notes</h3></div>
+                  <textarea value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} placeholder="e.g. Focus: Keeping head still..." className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white/90 placeholder:text-white/30 focus:ring-1 focus:ring-emerald-400 focus:border-emerald-400 outline-none transition-all min-h-[45px]" />
                 </div>
               </div>
               <GalleryGrid
@@ -1842,7 +1885,7 @@ export default function Home() {
             <div className="fixed inset-0 z-50 bg-black overflow-hidden select-none">
               {isBurning && (
                 <div className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm">
-                  <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                  <Loader2 className="w-12 h-12 text-emerald-400 animate-spin mb-4" />
                   <p className="text-white font-bold">{burnProgress}</p>
                 </div>
               )}
@@ -1906,7 +1949,7 @@ export default function Home() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-base font-bold">Swing {selectedClipIndex + 1} of {clips.length}</h2>
                     {clipByteSizes[selectedClipIndex] != null && (
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-black/60 text-gray-300">
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-black/60 text-white/80">
                         {clipByteSizes[selectedClipIndex]! < 1024 * 1024
                           ? `${Math.round(clipByteSizes[selectedClipIndex]! / 1024)}KB`
                           : `${(clipByteSizes[selectedClipIndex]! / (1024 * 1024)).toFixed(1)}MB`}
@@ -1916,7 +1959,7 @@ export default function Home() {
                   <div className="flex gap-1.5 mt-1">
                     <button
                       onClick={() => setDrawMode(drawMode === 'line' ? 'circle' : 'line')}
-                      className={`flex items-center justify-center p-2 rounded-lg transition-colors ${(drawMode === 'circle' || drawMode === 'line') ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+                      className={`flex items-center justify-center p-2 rounded-lg transition-colors ${(drawMode === 'circle' || drawMode === 'line') ? 'bg-emerald-500 text-white' : 'bg-white/10 text-white/60'}`}
                       title={`Switch to ${drawMode === 'circle' ? 'Line' : 'Circle'}`}
                     >
                       {drawMode === 'circle' ? <CircleIcon className="w-4 h-4" /> : (
@@ -1929,21 +1972,21 @@ export default function Home() {
                     </button>
                     <button
                       onClick={() => setDrawMode(drawMode === 'erase' ? 'line' : 'erase')}
-                      className={`flex items-center justify-center p-2 rounded-lg transition-colors ${drawMode === 'erase' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+                      className={`flex items-center justify-center p-2 rounded-lg transition-colors ${drawMode === 'erase' ? 'bg-emerald-500 text-white' : 'bg-white/10 text-white/60 hover:text-white'}`}
                       title="Eraser"
                     >
                       <Eraser className="w-4 h-4" />
                     </button>
                     <button
                       onClick={clearCanvas}
-                      className="flex items-center justify-center p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                      className="flex items-center justify-center p-2 rounded-lg bg-white/10 text-white/60 hover:text-white transition-colors"
                       title="Clear All"
                     >
                       <X className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => setShowNotes(!showNotes)}
-                      className={`flex items-center justify-center p-2 rounded-lg transition-colors ${showNotes ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+                      className={`flex items-center justify-center p-2 rounded-lg transition-colors ${showNotes ? 'bg-emerald-500 text-white' : 'bg-white/10 text-white/60'}`}
                       title="Toggle Notes"
                     >
                       <FileText className="w-4 h-4" />
@@ -1953,7 +1996,7 @@ export default function Home() {
                 <div className="flex items-center gap-2 pointer-events-auto">
                   <button
                     onClick={(e) => selectedClipIndex !== null && toggleFavorite(selectedClipIndex, e)}
-                    className={`p-2.5 rounded-full shadow-lg active:scale-90 transition-all ${selectedClipIndex !== null && favorites[selectedClipIndex] ? 'bg-amber-500 text-white' : 'bg-gray-800 text-white hover:text-amber-400'}`}
+                    className={`p-2.5 rounded-full shadow-lg active:scale-90 transition-all ${selectedClipIndex !== null && favorites[selectedClipIndex] ? 'bg-amber-500 text-white' : 'bg-white/10 text-white hover:text-amber-400'}`}
                     title="Favorite"
                   >
                     <Star className={`w-5 h-5 ${selectedClipIndex !== null && favorites[selectedClipIndex] ? 'fill-current' : ''}`} />
@@ -1969,30 +2012,30 @@ export default function Home() {
                     }}
                     onPointerUp={() => { clearTimeout(downloadLongPressRef.current ?? undefined); downloadLongPressRef.current = null; }}
                     onPointerLeave={() => { clearTimeout(downloadLongPressRef.current ?? undefined); downloadLongPressRef.current = null; }}
-                    className="p-2.5 bg-blue-600 rounded-full text-white shadow-lg active:scale-90 transition-transform"
+                    className="p-2.5 bg-emerald-500 rounded-full text-white shadow-lg active:scale-90 transition-transform"
                     title="Download (long-press to copy debug log)"
                   ><Download className="w-5 h-5" /></button>
                   <button
                     onClick={(e) => selectedClipIndex !== null && deleteClip(selectedClipIndex, e)}
-                    className="p-2.5 bg-gray-800 text-red-400 rounded-full shadow-lg active:scale-90 transition-transform hover:bg-red-900/40"
+                    className="p-2.5 bg-white/10 text-red-400 rounded-full shadow-lg active:scale-90 transition-transform hover:bg-red-900/40"
                     title="Delete"
                   >
                     <Trash2 className="w-5 h-5" />
                   </button>
-                  <button onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(null); }} className="p-2.5 bg-gray-800 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Close"><X className="w-5 h-5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); setSelectedClipIndex(null); }} className="p-2.5 bg-white/10 rounded-full text-white shadow-lg active:scale-90 transition-transform" title="Close"><X className="w-5 h-5" /></button>
                 </div>
               </div>
 
               {/* Notes Overlay */}
               {showNotes && (
                 <div className="absolute inset-x-0 bottom-32 px-6 z-50 animate-in slide-in-from-bottom duration-300">
-                  <div className="max-w-xl mx-auto bg-gray-900/90 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl">
-                    <div className="flex items-center justify-between mb-2 text-blue-400">
+                  <div className="max-w-xl mx-auto bg-black/40 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl">
+                    <div className="flex items-center justify-between mb-2 text-emerald-400">
                       <div className="flex items-center gap-2">
                         <FileText className="w-5 h-5" />
                         <h3 className="font-bold text-sm uppercase tracking-wider">Clip Notes</h3>
                       </div>
-                      <button onClick={() => setShowNotes(false)} className="p-1 rounded-md text-gray-400 hover:text-white transition-colors">
+                      <button onClick={() => setShowNotes(false)} className="p-1 rounded-md text-white/60 hover:text-white transition-colors">
                         <X className="w-4 h-4" />
                       </button>
                     </div>
@@ -2000,7 +2043,7 @@ export default function Home() {
                       value={shotNotes[selectedClipIndex]}
                       onChange={(e) => updateShotNote(selectedClipIndex, e.target.value)}
                       placeholder="Record feedback for this swing..."
-                      className="w-full bg-black/40 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder:text-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all min-h-[120px]"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white/90 placeholder:text-white/30 focus:ring-1 focus:ring-emerald-400 focus:border-emerald-400 outline-none transition-all min-h-[120px]"
                     />
                   </div>
                 </div>
